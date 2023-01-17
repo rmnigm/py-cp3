@@ -1,5 +1,5 @@
 # Python for science and engineering
-This is a repository containing homeworks of Python course in 3rd year of Applied Math undergraduate program in NRU HSE.
+This is a repository containing homeworks of Python course in 3rd year of Applied Math undergraduate program in HSE University.
 Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model and creating visualizations.
 
 Homeworks are annotated in russian language.
