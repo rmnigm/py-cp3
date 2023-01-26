@@ -23,14 +23,14 @@ Homeworks are annotated in russian language.
   $ cd <path to cloned repo>
   $ ~/.pyenv/versions/3.10.6/bin/python -m venv pycp_env
   ```
-  - Activate venv (will be active until you clode the terminal session or use `deactivate`)
-    ```bash
-    $ source pycp_env/bin/activate
-    ```  
-    In terminal you will now have a prefix:
-    ```bash
-    (pycp_env)$ ...
-    ```
+- Activate venv (will be active until you clode the terminal session or use `deactivate`)
+  ```bash
+  $ source pycp_env/bin/activate
+  ```  
+  In terminal you will now have a prefix:
+  ```bash
+  (pycp_env)$ ...
+  ```
 
 - Check everything is correct and `python` and `pip` lead to `pycp_env`
     ```bash
