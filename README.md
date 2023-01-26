@@ -15,7 +15,7 @@ Homeworks are annotated in russian language.
 - Install Pyenv using [this guide](https://github.com/pyenv/pyenv#installation)
 - Install Python, used in project
   ```bash
-  $ pyenv install 3.10.6
+  $ pyenv install 3.10.9
   ```
   If any problems happen - this [guide](https://github.com/pyenv/pyenv/wiki/Common-build-problems) can help.
 - Create virtual environment for Python in repo
