@@ -1,9 +1,9 @@
 # Python for science and engineering
 ## What is this?
-This is a repository containing homeworks of Python course in 3rd year of Applied Math undergraduate program in HSE University.
-Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model and creating visualizations.
+This is a repository containing numerical algorithms in Python for mathematical modelling.
+The task author is Stanislav Alekseevich Bober, teacher of [Python course[(https://www.hse.ru/edu/courses/646488730) at HSE University.
 
-Homeworks are annotated in russian language.
+Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model and creating visualizations. Code is annotated in russian language.
 **Currently solved:**
 - Ferromagnetic energy Izing model
 - Lyapunov's fractal interactive map
@@ -15,13 +15,13 @@ Homeworks are annotated in russian language.
 - Install Pyenv using [this guide](https://github.com/pyenv/pyenv#installation)
 - Install Python, used in project
   ```bash
-  $ pyenv install 3.10.9
+  $ pyenv install 3.9.16
   ```
   If any problems happen - this [guide](https://github.com/pyenv/pyenv/wiki/Common-build-problems) can help.
 - Create virtual environment for Python in repo
   ```bash
   $ cd <path to cloned repo>
-  $ ~/.pyenv/versions/3.10.6/bin/python -m venv pycp_env
+  $ ~/.pyenv/versions/3.9.16/bin/python -m venv pycp_env
   ```
 - Activate venv (will be active until you clode the terminal session or use `deactivate`)
   ```bash
