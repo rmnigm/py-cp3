@@ -1,7 +1,7 @@
 # Python for science and engineering
 ## What is this?
 This is a repository containing numerical algorithms in Python for mathematical modelling.
-The task author is Stanislav Alekseevich Bober, teacher of [Python course[(https://www.hse.ru/edu/courses/646488730) at HSE University.
+The task author is Stanislav Alekseevich Bober, teacher of [Python course](https://www.hse.ru/edu/courses/646488730) at HSE University.
 
 Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model and creating visualizations. Code is annotated in russian language.
 **Currently solved:**
