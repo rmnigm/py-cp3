@@ -4,8 +4,9 @@ scikit-learn==1.2.1
 numpy==1.23.2  # numba max version 1.23.2
 pandas==1.4.4
 
-# c bindings and compilers
+# c bindings, compilers, unix
 numba==0.56.2
+ffmpeg
 
 # instruments
 tqdm>=4.64.1
@@ -14,6 +15,7 @@ tqdm>=4.64.1
 matplotlib==3.5.3
 seaborn==0.12.0
 holoviews>=1.15
+vispy>=0.12
 
 # testing and linting
 flake8==5.0.4
