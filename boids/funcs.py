@@ -1,14 +1,15 @@
 import numpy as np
-from numba import njit, prange
+from numba import njit, prange  # type: ignore
 
 
 def init_boids(boids: np.ndarray, asp: float, v_range: tuple = (0., 1.)):
     n = boids.shape[0]
     rng = np.random.default_rng()
+    low, high = v_range
     boids[:, 0] = rng.uniform(0., asp, size=n)
     boids[:, 1] = rng.uniform(0., 1., size=n)
     alpha = rng.uniform(0, 2*np.pi, size=n)
-    v = rng.uniform(*v_range, size=n)
+    v = rng.uniform(low=low, high=high, size=n)
     c, s = np.cos(alpha), np.sin(alpha)
     boids[:, 2] = v * c
     boids[:, 3] = v * s
@@ -23,7 +24,8 @@ def directions(boids: np.ndarray, dt: float) -> np.ndarray:
 def norm(arr: np.ndarray):
     """
     Calculates norm via first axis
-    param: a - (N, D)-shaped array of points, where D is the dimensions and N is points quantity
+    param: a - (N, D)-shaped array of points, where D is the dimensions
+           and N is points quantity
     returns: float, norm
     """
     return np.sqrt(np.sum(arr**2, axis=1))
@@ -42,7 +44,7 @@ def mean_axis(arr, axis):
         for i in range(len(result)):
             result[i] = np.mean(arr[i, :])
     return result
-    
+
 
 @njit()
 def clip_mag(arr: np.ndarray,
@@ -150,8 +152,14 @@ def flocking(boids: np.ndarray,
             coh = cohesion(boids, i, mask[i], perception)
             alg = alignment(boids, i, mask[i], v_range)
             sep = separation(boids, i, mask[i])
-        boids[i, 4] = coeffs[0] * coh[0] + coeffs[1] * alg[0] + coeffs[2] * sep[0] + coeffs[3] * wal[i][0]
-        boids[i, 5] = coeffs[0] * coh[1] + coeffs[1] * alg[1] + coeffs[2] * sep[1] + coeffs[3] * wal[i][1]
+        boids[i, 4] = (coeffs[0] * coh[0]
+                       + coeffs[1] * alg[0]
+                       + coeffs[2] * sep[0]
+                       + coeffs[3] * wal[i][0])
+        boids[i, 5] = (coeffs[0] * coh[1]
+                       + coeffs[1] * alg[1]
+                       + coeffs[2] * sep[1]
+                       + coeffs[3] * wal[i][1])
 
 
 def simulation_step(boids: np.ndarray,

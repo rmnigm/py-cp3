@@ -1,16 +1,13 @@
 import numpy as np
 import imageio
-from datetime import datetime
-from vispy import app, scene
-from vispy.geometry import Rect
-from vispy.scene.visuals import Text
+from vispy import app, scene  # type: ignore
+from vispy.geometry import Rect  # type: ignore
+from vispy.scene.visuals import Text  # type: ignore
 
 from funcs import init_boids, directions, simulation_step
 
 w, h = 1920, 1080
-N = 100
-dt = 0.1
-asp = w / h
+N, dt, asp = 100, 0.1, w / h
 perception = 1 / 20
 v_range = (0, 0.1)
 c_names = {"alignment": 0.1, "cohesion": 0.04, "separation": 5, "walls": 0.05}
@@ -18,7 +15,6 @@ c = np.array(list(c_names.values()))
 
 boids = np.zeros((N, 6), dtype=np.float64)
 init_boids(boids, asp, v_range=v_range)
-fr = 0
 
 canvas = scene.SceneCanvas(show=True, size=(w, h))
 view = canvas.central_widget.add_view()
@@ -28,8 +24,6 @@ arrows = scene.Arrow(arrows=directions(boids, dt),
                      arrow_size=5,
                      connect='segments',
                      parent=view.scene)
-arrows.set_data(arrows=directions(boids, dt))
-
 txt = Text(parent=canvas.scene, color='green', face='Consolas')
 txt.pos = canvas.size[0] // 16, canvas.size[1] // 35
 txt.font_size = 12
@@ -42,20 +36,13 @@ for key, val in c_names.items():
 txt_const.text = general_info
 
 
-fname = f"boids_{datetime.now().strftime('%Y-%m-%dT%H-%M')}.mp4"
-print(fname)
-
-# process = ffmpeg\
-#     .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f"{w}x{h}", r=60)\
-#     .output(fname, pix_fmt='yuv420p', preset='slower', r=60)\
-#     .overwrite_output()\
-#     .run_async(pipe_stdin=True)
+arrows.set_data(arrows=directions(boids, dt))
 writer = imageio.get_writer(f'animation_{N}.mp4', fps=60)
+fr = 0
 
 
 def update(event):
     global boids, fr, txt
-    # global process
     if fr % 30 == 0:
         txt.text = "fps:" + f"{canvas.fps:0.1f}"
     fr += 1
