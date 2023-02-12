@@ -1,10 +1,10 @@
 w = 1920
 h = 1080
-N = 100
+N = 200
 dt = 0.1
 asp = w / h
 perception = 1 / 20
-v_range = (0, 0.1)
+vrange = (0, 0.1)
 coefficients = {"alignment": 0.04,
                 "cohesion": 0.02,
                 "separation": 6,
