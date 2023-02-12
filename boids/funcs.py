@@ -3,6 +3,7 @@ from numba import njit, prange  # type: ignore
 
 
 def init_boids(boids: np.ndarray, asp: float, v_range: tuple = (0., 1.)) -> np.ndarray:
+    """Initialize random boids and their speed in array from uniform distribution"""
     n = boids.shape[0]
     rng = np.random.default_rng()
     low, high = v_range
@@ -17,24 +18,20 @@ def init_boids(boids: np.ndarray, asp: float, v_range: tuple = (0., 1.)) -> np.n
 
 
 @njit()
-def directions(boids: np.ndarray,
-               dt: float) -> np.ndarray:
+def directions(boids: np.ndarray, dt: float) -> np.ndarray:
+    """Calculate directions for arrows in boids model by propagating with speed and acceleration"""
     return np.hstack((boids[:, :2] - dt * boids[:, 2:4], boids[:, :2]))
 
 
 @njit()
 def norm(arr: np.ndarray):
-    """
-    Calculates norm via first axis
-    param: a - (N, D)-shaped array of points, where D is the dimensions
-           and N is points quantity
-    returns: (N,)-shaped array of norms
-    """
+    """Calculates norm via first axis"""
     return np.sqrt(np.sum(arr**2, axis=1))
 
 
 @njit()
 def mean_axis(arr, axis):
+    """Calculates mean over chosen axis, njit-compilable"""
     assert arr.ndim == 2
     assert axis in [0, 1]
     if axis == 0:
@@ -50,6 +47,7 @@ def mean_axis(arr, axis):
 
 @njit()
 def median_axis(arr, axis):
+    """Calculates median over chosen axis, njit-compilable"""
     assert arr.ndim == 2
     assert axis in [0, 1]
     if axis == 0:
@@ -66,6 +64,7 @@ def median_axis(arr, axis):
 @njit()
 def clip_mag(arr: np.ndarray,
              lims: tuple[float, float] = (0., 1.)):
+    """Spots boids with speed greater than limit and clips it to limit"""
     v = norm(arr)
     mask = v > 0
     v_clip = np.clip(v, *lims)
@@ -74,6 +73,7 @@ def clip_mag(arr: np.ndarray,
 
 @njit()
 def propagate(boids: np.ndarray, dt: float, v_range: tuple):
+    """Updates the speed of boids via acceleration, clips it to limit and updates the position of boids"""
     boids[:, 2:4] += dt * boids[:, 4:6]
     clip_mag(boids[:, 2:4], lims=v_range)
     boids[:, 0:2] += dt * boids[:, 2:4]
@@ -81,11 +81,13 @@ def propagate(boids: np.ndarray, dt: float, v_range: tuple):
 
 @njit()
 def periodic_walls(boids: np.ndarray, asp: float):
+    """Sets the position of boids with respect to periodic walls for them to not fly away"""
     boids[:, 0:2] %= np.array([asp, 1.])
 
 
 @njit()
 def wall_avoidance(boids: np.ndarray, asp: float):
+    """Implements wall avoidance component in acceleration logic for boids"""
     left = np.abs(boids[:, 0])
     right = np.abs(asp - boids[:, 0])
     bottom = np.abs(boids[:, 1])
@@ -97,6 +99,7 @@ def wall_avoidance(boids: np.ndarray, asp: float):
 
 @njit()
 def walls(boids: np.ndarray, asp: float):
+    """Calculates wall positions with respet to boids position for components in acceleration"""
     c = 1
     x = boids[:, 0]
     y = boids[:, 1]
@@ -109,6 +112,7 @@ def walls(boids: np.ndarray, asp: float):
 
 @njit()
 def distance(boids: np.ndarray) -> np.ndarray:
+    """Calculates pairwise euclidean distance between boids"""
     p = boids[:, :2]
     n = p.shape[0]
     dist = np.zeros(shape=(n, n), dtype=np.float64)
@@ -123,6 +127,7 @@ def distance(boids: np.ndarray) -> np.ndarray:
 
 @njit()
 def normalize(v):
+    """Normalize vector to norm = 1"""
     v_norm = np.linalg.norm(v)
     if norm == 0:
         return v
@@ -131,6 +136,10 @@ def normalize(v):
 
 @njit()
 def visibility(boids: np.ndarray, perception: float, angle: float) -> np.ndarray:
+    """
+    Calculates pairwise euclidean distance between boids, angles and returns mask of visibility,
+    implements a sector of angle width = (-arccos(angle), arccos(angle)) and radius = perception
+    """
     vectors = boids[:, :2]
     speeds = boids[:, 2:4]
     n = vectors.shape[0]
@@ -155,6 +164,7 @@ def cohesion(boids: np.ndarray,
              idx: int,
              neigh_mask: np.ndarray,
              perception: float) -> np.ndarray:
+    """Implements cohesion component of acceleration via median center of group in sector"""
     center = median_axis(boids[neigh_mask, :2], axis=0)
     a = (center - boids[idx, :2]) / perception
     return a
@@ -164,6 +174,7 @@ def cohesion(boids: np.ndarray,
 def separation(boids: np.ndarray,
                idx: int,
                neigh_mask: np.ndarray) -> np.ndarray:
+    """Implements separation component of acceleration via median within group in sector"""
     d = median_axis(boids[neigh_mask, :2] - boids[idx, :2], axis=0)
     return -d / ((d[0]**2 + d[1]**2) + 1)
 
@@ -173,6 +184,7 @@ def alignment(boids: np.ndarray,
               idx: int,
               neigh_mask: np.ndarray,
               v_range: tuple) -> np.ndarray:
+    """Implements median-based alingment component of acceleration within group in sector"""
     v_mean = median_axis(boids[neigh_mask, 2:4], axis=0)
     a = (v_mean - boids[idx, 2:4]) / (2 * v_range[1])
     return a
@@ -180,6 +192,7 @@ def alignment(boids: np.ndarray,
 
 @njit()
 def noise():
+    """Implements of random noise in (-1, 1) interval for two coordinated, njit-compilable"""
     arr = np.random.rand(2)
     if np.random.rand(1) > .5:
         arr[0] *= -1
@@ -194,6 +207,10 @@ def flocking(boids: np.ndarray,
              coeffs: np.ndarray,
              asp: float,
              v_range: tuple) -> None:
+    """
+    Implements boids visibility computation and acceleration computation via four different
+    components - cohesion, alignment, separation, noise within sector of certain radius and angle
+    """
     n = boids.shape[0]
     mask = visibility(boids, perception, 0)
     wal = walls(boids, asp)
@@ -226,6 +243,7 @@ def simulation_step(boids: np.ndarray,
                     coefficients: np.ndarray,
                     v_range: tuple,
                     dt: float) -> None:
+    """Implements full step of boids model simulation with updating their positions and propagation"""
     flocking(boids, perception, coefficients, asp, v_range)
     propagate(boids, dt, v_range)
     periodic_walls(boids, asp)

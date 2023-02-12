@@ -40,6 +40,7 @@ fr = 0
 
 
 def make_video(event):
+    """Write boids model visualization to video file using VisPy and ffmpeg"""
     global boids, fr, txt
     if fr % 30 == 0:
         txt.text = "fps:" + f"{canvas.fps:0.1f}"
@@ -55,6 +56,7 @@ def make_video(event):
 
 
 def update(event):
+    """Render boids model visualization on screen using VisPy"""
     global boids, fr, txt
     if fr % 30 == 0:
         txt.text = "fps:" + f"{canvas.fps:0.1f}"
