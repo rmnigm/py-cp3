@@ -1,7 +1,17 @@
-### Условие задачи
+## How to run
+First of all get familiar with `config.py` file - it sets all the useful model parameters.
+- Most important are `N` - number of boids - and `coefficients` - values of coefficients for components of acceleration.
+- Parameters `video` and `frames` are for visualization - whether to record a video and max frames in video.
+
+After that, you could just run it from root of repository.
+```(bash)
+(pycp_env)$ python boids/main.py
+```
 
 
-**Дано:**
+## Task and model description
+
+### Дано
 - симуляционная модель [**boids**](https://www.red3d.com/cwr/boids/)
     - состоит из набора агентов
     - агенты взаимодействуют только с локальными соседями (в радиусе видимости)
@@ -16,7 +26,7 @@
 - модули `vispy`, `numpy`, `numba`
 
 
-**Требуется:**
+### Требуется 
 - реализовать алгоритм эволюции модели **boids** во времени
 - используя модуль `vispy` создать окно и реализовать визуализацию модели
     - также выводить в окне текст:
@@ -39,13 +49,12 @@
 - задокументировать функции
 
 
-**Материалы:**
+### Материалы
 - [boids](https://www.red3d.com/cwr/boids/)
 - [Coding Challenge #124: Flocking Simulation](https://www.youtube.com/watch?v=mhjuuHl6qHM&t=1s)
 - [FFMPEG](https://ffmpeg.org/)
 - [ffmpeg-python](https://pypi.org/project/ffmpeg-python/)
 
-
-**Рекомендации:**
+### Рекомендации
 - использовать IDE **Pycharm** (полная версия для студентов и преподавателей)
 - в качестве бекэнда для `vispy` использовать кроссплатформенный модуль `pyglet`
