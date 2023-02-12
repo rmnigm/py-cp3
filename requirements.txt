@@ -10,7 +10,7 @@ numba==0.56.2
 # instruments
 tqdm==4.64.1
 
-# visualisation
+# visualisation and video
 matplotlib==3.5.3
 seaborn==0.12.0
 holoviews==1.15
