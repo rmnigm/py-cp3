@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit, prange  # type: ignore
 
 
-def init_boids(boids: np.ndarray, asp: float, v_range: tuple = (0., 1.)):
+def init_boids(boids: np.ndarray, asp: float, v_range: tuple = (0., 1.)) -> np.ndarray:
     n = boids.shape[0]
     rng = np.random.default_rng()
     low, high = v_range
@@ -13,10 +13,12 @@ def init_boids(boids: np.ndarray, asp: float, v_range: tuple = (0., 1.)):
     c, s = np.cos(alpha), np.sin(alpha)
     boids[:, 2] = v * c
     boids[:, 3] = v * s
+    return boids
 
 
 @njit()
-def directions(boids: np.ndarray, dt: float) -> np.ndarray:
+def directions(boids: np.ndarray,
+               dt: float) -> np.ndarray:
     return np.hstack((boids[:, :2] - dt * boids[:, 2:4], boids[:, :2]))
 
 
@@ -26,7 +28,7 @@ def norm(arr: np.ndarray):
     Calculates norm via first axis
     param: a - (N, D)-shaped array of points, where D is the dimensions
            and N is points quantity
-    returns: float, norm
+    returns: (N,)-shaped array of norms
     """
     return np.sqrt(np.sum(arr**2, axis=1))
 
@@ -43,6 +45,21 @@ def mean_axis(arr, axis):
         result = np.empty(arr.shape[0], dtype=arr.dtype)
         for i in range(len(result)):
             result[i] = np.mean(arr[i, :])
+    return result
+
+
+@njit()
+def median_axis(arr, axis):
+    assert arr.ndim == 2
+    assert axis in [0, 1]
+    if axis == 0:
+        result = np.empty(arr.shape[1], dtype=arr.dtype)
+        for i in range(len(result)):
+            result[i] = np.median(arr[:, i])
+    else:
+        result = np.empty(arr.shape[0], dtype=arr.dtype)
+        for i in range(len(result)):
+            result[i] = np.median(arr[i, :])
     return result
 
 
@@ -105,11 +122,40 @@ def distance(boids: np.ndarray) -> np.ndarray:
 
 
 @njit()
+def normalize(v):
+    v_norm = np.linalg.norm(v)
+    if norm == 0:
+        return v
+    return v / v_norm
+
+
+@njit()
+def visibility(boids: np.ndarray, perception: float, angle: float) -> np.ndarray:
+    vectors = boids[:, :2]
+    speeds = boids[:, 2:4]
+    n = vectors.shape[0]
+    dist = np.zeros(shape=(n, n), dtype=np.float64)
+    angles = np.zeros(shape=(n, n), dtype=np.float64)
+    for i in range(n):
+        for j in range(n):
+            v = vectors[i] - vectors[j]
+            d = (v @ v)
+            dist[i, j] = d
+            angles[i, j] = np.dot(normalize(speeds[i]), normalize(v))
+    dist = np.sqrt(dist)
+    distance_mask = dist < perception
+    angle_mask = angles > angle
+    mask = np.logical_and(distance_mask, angle_mask)
+    np.fill_diagonal(mask, False)
+    return mask
+
+
+@njit()
 def cohesion(boids: np.ndarray,
              idx: int,
              neigh_mask: np.ndarray,
              perception: float) -> np.ndarray:
-    center = mean_axis(boids[neigh_mask, :2], 0)
+    center = median_axis(boids[neigh_mask, :2], axis=0)
     a = (center - boids[idx, :2]) / perception
     return a
 
@@ -118,7 +164,7 @@ def cohesion(boids: np.ndarray,
 def separation(boids: np.ndarray,
                idx: int,
                neigh_mask: np.ndarray) -> np.ndarray:
-    d = mean_axis(boids[neigh_mask, :2] - boids[idx, :2], axis=0)
+    d = median_axis(boids[neigh_mask, :2] - boids[idx, :2], axis=0)
     return -d / ((d[0]**2 + d[1]**2) + 1)
 
 
@@ -127,9 +173,19 @@ def alignment(boids: np.ndarray,
               idx: int,
               neigh_mask: np.ndarray,
               v_range: tuple) -> np.ndarray:
-    v_mean = mean_axis(boids[neigh_mask, 2:4], axis=0)
+    v_mean = median_axis(boids[neigh_mask, 2:4], axis=0)
     a = (v_mean - boids[idx, 2:4]) / (2 * v_range[1])
     return a
+
+
+@njit()
+def noise():
+    arr = np.random.rand(2)
+    if np.random.rand(1) > .5:
+        arr[0] *= -1
+    if np.random.rand(1) > .5:
+        arr[1] *= -1
+    return arr
 
 
 @njit(parallel=True)
@@ -138,28 +194,30 @@ def flocking(boids: np.ndarray,
              coeffs: np.ndarray,
              asp: float,
              v_range: tuple) -> None:
-    D = distance(boids)
-    N = boids.shape[0]
-    np.fill_diagonal(D, perception + 1)
-    mask = D < perception
+    n = boids.shape[0]
+    mask = visibility(boids, perception, 0)
     wal = walls(boids, asp)
-    for i in prange(N):
+    for i in prange(n):
         if not np.any(mask[i]):
             coh = np.zeros(2)
             alg = np.zeros(2)
             sep = np.zeros(2)
+            ns = np.zeros(2)
         else:
             coh = cohesion(boids, i, mask[i], perception)
             alg = alignment(boids, i, mask[i], v_range)
             sep = separation(boids, i, mask[i])
+            ns = noise()
         boids[i, 4] = (coeffs[0] * coh[0]
                        + coeffs[1] * alg[0]
                        + coeffs[2] * sep[0]
-                       + coeffs[3] * wal[i][0])
+                       + coeffs[3] * wal[i][0]
+                       + coeffs[4] * ns[0])
         boids[i, 5] = (coeffs[0] * coh[1]
                        + coeffs[1] * alg[1]
                        + coeffs[2] * sep[1]
-                       + coeffs[3] * wal[i][1])
+                       + coeffs[3] * wal[i][1]
+                       + coeffs[4] * ns[0])
 
 
 def simulation_step(boids: np.ndarray,
