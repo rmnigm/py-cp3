@@ -6,18 +6,20 @@ pandas==1.4.4
 
 # c bindings, compilers, unix
 numba==0.56.2
-ffmpeg
 
 # instruments
-tqdm>=4.64.1
+tqdm==4.64.1
 
-# visualisation
+# visualisation and video
 matplotlib==3.5.3
 seaborn==0.12.0
-holoviews>=1.15
-vispy>=0.12
+holoviews==1.15
+vispy==0.12
+ffmpeg-python==0.2.0
+imageio==2.25.0
+imageio-ffmpeg==0.4.8
+
 
 # testing and linting
 flake8==5.0.4
 mypy==0.971
-pytest==7.1.3
