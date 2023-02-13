@@ -1,7 +1,7 @@
 # Boids 2D model
 
 ## Description
-This is the implementation of [boids](https://www.red3d.com/cwr/boids/) model in Python with numpy and numba JIT-compilation. Minor changes were added to formulas of the components - each boid only sees a 180-degree sector in front and some values are medians instead of mean.
+This is the implementation of [boids](https://www.red3d.com/cwr/boids/) model in Python with `numpy` and `numba` **JIT-compilation**. Minor changes were added to formulas of the components - each boid only sees a 180-degree sector in front and some values are medians instead of mean.
 
 Visualization is made with `VisPy` library, `PyQT` video backend and `imageio-ffmpeg` tool.
 Example videos are available on [Youtube](https://youtu.be/28eeQrRkj7o).
