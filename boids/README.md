@@ -1,3 +1,11 @@
+# Boids 2D model
+
+## Description
+This is the implementation of [boids](https://www.red3d.com/cwr/boids/) model in Python with numpy and numba JIT-compilation. Minor changes were added to formulas of the components - each boid only sees a 180-degree sector in front and some values are medians instead of mean.
+
+Visualization is made with `VisPy` library, `PyQT` video backend and `imageio-ffmpeg` tool.
+Example videos are available on [Youtube](https://youtu.be/28eeQrRkj7o).
+
 ## How to run
 First of all get familiar with `config.py` file - it sets all the useful model parameters.
 - Most important are `N` - number of boids - and `coefficients` - values of coefficients for components of acceleration.
@@ -8,53 +16,4 @@ After that, you could just run it from root of repository.
 (pycp_env)$ python boids/main.py
 ```
 
-
-## Task and model description
-
-### Дано
-- симуляционная модель [**boids**](https://www.red3d.com/cwr/boids/)
-    - состоит из набора агентов
-    - агенты взаимодействуют только с локальными соседями (в радиусе видимости)
-    - три типа взаимодействия между агентами:
-        - **alignment** (выравнивание вектора скорости по локальным соседям)
-        - **cohesion** (стремление в геометрический центр локальных соседей)
-        - **separaion** (избегание локального перенаселения)
-    - взаимодействие агентов с границами
-    - шум, символизирующий множество неучтенных факторов
-    - величина итогового взаимодействия получается смешиванием всех взаимодействий с весами:
-        - $a, b, c, d, e$
-- модули `vispy`, `numpy`, `numba`
-
-
-### Требуется 
-- реализовать алгоритм эволюции модели **boids** во времени
-- используя модуль `vispy` создать окно и реализовать визуализацию модели
-    - также выводить в окне текст:
-        - количество агентов
-        - значения параметров - $a, b, c, d, e$
-        - частоту кадров (fps)
-- внести изменения в функции расчета взаимодействий таким образом, чтобы:
-    - взаимодействия качественно не меняли свой смысл (т.е. separation должно исходить из цели избегания локального перенаселения)
-    - отличались от реализованных на семинарах
-- **в комментариях и докстрингах описать, где и какие изменения были сделани, их смысл**
-- применить компиляцию `@njit` из модуля `numba` с использованием распараллеливания
-- для **трех** различных нетривиальных типов поведения подобрать параметры - $a, b, c, d, e$
-- выполнить вычисления для количества агентов $N_1 = 100$, $N_2 = 1000$, $N_3 = 5000$ и найденных типов поведения
-    - для 1800 - 3600 временных шагов
-- создать видеоролики, демонстрирующие эволюцию системы (например, при момощи помощи `ffmpeg-python`):
-    - для каждого $N_i$
-    - для каждого типа поведения
-    - длительностью 30 с - 1 мин
-    - частота кадров - 60 к/с
-- задокументировать функции
-
-
-### Материалы
-- [boids](https://www.red3d.com/cwr/boids/)
-- [Coding Challenge #124: Flocking Simulation](https://www.youtube.com/watch?v=mhjuuHl6qHM&t=1s)
-- [FFMPEG](https://ffmpeg.org/)
-- [ffmpeg-python](https://pypi.org/project/ffmpeg-python/)
-
-### Рекомендации
-- использовать IDE **Pycharm** (полная версия для студентов и преподавателей)
-- в качестве бекэнда для `vispy` использовать кроссплатформенный модуль `pyglet`
+## 
