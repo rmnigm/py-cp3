@@ -10,6 +10,7 @@ Tasks are mostly computationally complex problems from physics or mathematical m
 - Lyapunov's fractal interactive map
 - Procrustes analysis for sets of 3-dimensional figures
 - Heat transfer modelling in 2-dimensional space
+- Boids 2D spatial imitational model of agent behavior 
 
 ## How to setup (Unix)
 - Clone repository to local machine
