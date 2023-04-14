@@ -16,6 +16,12 @@ pixels = ti.Vector.field(3, dtype=ti.f32, shape=res)
 
 @ti.kernel
 def render(t: ti.f32):
+    """
+    Base version of version of the Psychedelic Sakura shader from shadertoy,
+    implemented in taichi and Python with additional GLSL functions
+    :param t: ti.int32, time moment for shader rendering
+    :return: None
+    """
     for frag_coord in ti.grouped(pixels):
         uv = frag_coord / resvec.xy
         col = ts.vec3(1.0)
