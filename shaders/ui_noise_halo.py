@@ -17,6 +17,13 @@ pixels = ti.Vector.field(3, dtype=ti.f32, shape=res)
 
 @ti.func
 def draw(vuv, time):
+    """
+    Kernel logic function for noisy halo shader from shadertoy. Calculates random noise from
+    vector to form a random circle-like figure, using interpolation sets the boundaries to
+    certain ranges, created two light sources, dependent on distances to center and shadows
+    the plane points which are not on inside the radius. Implemented in taichi, copied from
+    GLSL implementation with no changes.
+    """
     uv = vuv
     ang = ts.atan(uv.y, uv.x)
     uv_len = length(uv)
@@ -52,6 +59,7 @@ def draw(vuv, time):
 
 @ti.kernel
 def run(t: ti.f32):
+    """Kernel runner for halo shader"""
     bg = ts.vec3(ti.sin(t) * 0.5 + 0.5) * 0.0 + ts.vec3(0.0)
     for frag_coord in ti.grouped(pixels):
         uv = (frag_coord * 2.0 - res_vec) / res_vec[1]
