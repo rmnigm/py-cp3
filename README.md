@@ -3,14 +3,17 @@
 This is a repository containing numerical algorithms in Python for mathematical modelling.
 The task author is Stanislav Alekseevich Bober, teacher of [Python course](https://www.hse.ru/edu/courses/646488730) at HSE University.
 
-Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model and different visualizations. Solutions are annotated in russian language mostly (except docstrings for functions).
+Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model and different visualizations. And they are really pretty!
 
-**Currently solved:**
+<img src="https://github.com/rmnigm/py-cp3/blob/84d14af3215326c199e3de8dd29fa45a3a3361f1/shaders/noisy_halo.gif?raw=true" height="360px" width="640px">
+
+## Models and implementations
+- Shaders and computer graphics with **Taichi**
+- Boids 2D spatial imitational model of agent behavior
+- Heat transfer modelling in 2-dimensional space
 - Ferromagnetic energy Izing model
 - Lyapunov's fractal interactive map
 - Procrustes analysis for sets of 3-dimensional figures
-- Heat transfer modelling in 2-dimensional space
-- Boids 2D spatial imitational model of agent behavior 
 
 ## How to setup (Unix)
 - Clone repository to local machine
