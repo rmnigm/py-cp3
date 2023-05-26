@@ -6,7 +6,7 @@ from triangular_lens import setup
 
 
 ti.init(arch=ti.cpu)
-nx, ny = 800, 800
+nx, ny = 800, 450
 res = nx, ny
 res_vec = ts.vec2(float(nx), float(ny))
 
@@ -26,6 +26,7 @@ present = ti.Vector.field(3, dtype=ti.f32, shape=res)
 future = ti.Vector.field(3, dtype=ti.f32, shape=res)
 ahead = ti.Vector.field(3, dtype=ti.f32, shape=res)
 kappa = ti.Vector.field(3, dtype=ti.f32, shape=res)
+
 
 pixels = ti.Vector.field(3, dtype=ti.f32, shape=res)
 
@@ -95,6 +96,7 @@ def accumulate():
     for i, j in pixels:
         if 0 < i < nx - 1 and 0 < j < ny - 1:
             pixels[i, j] += acc * ti.abs(ahead[i, j]) * kappa[i, j] / (c * dt / h)
+            # pixels[i, j] = kappa[i, j]
 
 
 @ti.kernel
