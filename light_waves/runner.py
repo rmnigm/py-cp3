@@ -6,7 +6,7 @@ from triangular_lens import setup
 
 
 ti.init(arch=ti.cpu)
-nx, ny = 800, 450
+nx, ny = 1600, 901
 res = nx, ny
 res_vec = ts.vec2(float(nx), float(ny))
 
@@ -15,8 +15,8 @@ c = 1.0             # скорость распространения волн
 dt = h / (c * 1.5)  # временной шаг
 acc = 0.1           # вес кадра для аккумулятора
 n = np.array([      # коэффициент преломления
-    1.30,           # R
-    1.35,           # G
+    1.20,           # R
+    1.30,           # G
     1.40            # B
 ])
 
@@ -75,24 +75,24 @@ def open_boundary():
     for i, j in light:
         if i == 0:
             light[i, j].future = (light[i + 1, j].present
-                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                                            * (light[i + 1, j].present - light[i, j].present)
-                                            )
+                                  + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                  * (light[i + 1, j].present - light[i, j].present)
+                                  )
         elif i == nx - 1:
             light[i, j].future = (light[i - 1, j].present
-                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                                            * (light[i - 1, j].future - light[i, j].present)
-                                            )
+                                  + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                  * (light[i - 1, j].future - light[i, j].present)
+                                  )
         if j == 0:
             light[i, j].future = (light[i, j + 1].present
-                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                                            * (light[i, j + 1].future - light[i, j].present)
-                                            )
+                                  + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                  * (light[i, j + 1].future - light[i, j].present)
+                                  )
         elif j == ny - 1:
             light[i, j].future = (light[i, j - 1].present
-                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                                            * (light[i, j - 1].future - light[i, j].present)
-                                            )
+                                  + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                  * (light[i, j - 1].future - light[i, j].present)
+                                  )
 
 
 @ti.func
