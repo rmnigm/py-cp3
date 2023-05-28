@@ -21,21 +21,25 @@ n = np.array([      # коэффициент преломления
 ])
 
 
-past = ti.Vector.field(3, dtype=ti.f32, shape=res)
-present = ti.Vector.field(3, dtype=ti.f32, shape=res)
-future = ti.Vector.field(3, dtype=ti.f32, shape=res)
-ahead = ti.Vector.field(3, dtype=ti.f32, shape=res)
+light = ti.Struct.field({
+    "past": ti.math.vec3,
+    "present": ti.math.vec3,
+    "future": ti.math.vec3,
+    "ahead": ti.math.vec3,
+    }, shape=res)
+
 kappa = ti.Vector.field(3, dtype=ti.f32, shape=res)
-
-
 pixels = ti.Vector.field(3, dtype=ti.f32, shape=res)
 
 model = setup(nx, ny)
+filler = {
+    'past': model['field'],
+    'present': model['field'],
+    'future': model['field'],
+    'ahead': model['field'],
+}
 kappa.from_numpy(model['kappa'])
-past.from_numpy(model['field'])
-present.from_numpy(model['field'])
-future.from_numpy(model['field'])
-ahead.from_numpy(model['field'])
+light.from_numpy(filler)
 
 
 @ti.func
@@ -43,24 +47,24 @@ def propagate():
     """
     Один шаг интегрирования уравнений распространения волны по Эйлеру
     """
-    for x, y in ahead:
+    for x, y in light:
         if x != 0 and y != 0 and x != nx and y != ny:
-            ahead[x, y] = kappa[x, y] ** 2 * (
-                future[x - 1, y] +
-                future[x + 1, y] +
-                future[x, y - 1] +
-                future[x, y + 1] -
-                4 * future[x, y]
-            ) + 2 * future[x, y] - present[x, y]
+            light[x, y].ahead = kappa[x, y] ** 2 * (
+                    light[x - 1, y].future +
+                    light[x + 1, y].future +
+                    light[x, y - 1].future +
+                    light[x, y + 1].future -
+                    4 * light[x, y].future
+            ) + 2 * light[x, y].future - light[x, y].present
 
 
 @ti.func
 def time_shift():
-    for x, y in future:
+    for x, y in light:
         if x != 0 and y != 0 and x != nx and y != ny:
-            past[x, y] = present[x, y]
-            present[x, y] = future[x, y]
-            future[x, y] = ahead[x, y]
+            light[x, y].past = light[x, y].present
+            light[x, y].present = light[x, y].future
+            light[x, y].future = light[x, y].ahead
 
 
 @ti.func
@@ -68,34 +72,34 @@ def open_boundary():
     """
     Граничные условия открытой границы
     """
-    for i, j in future:
+    for i, j in light:
         if i == 0:
-            future[i, j] = (present[i + 1, j]
-                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                            * (future[i + 1, j] - present[i, j])
-                            )
+            light[i, j].future = (light[i + 1, j].present
+                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                            * (light[i + 1, j].present - light[i, j].present)
+                                            )
         elif i == nx - 1:
-            future[i, j] = (present[i - 1, j]
-                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                            * (future[i - 1, j] - present[i, j])
-                            )
+            light[i, j].future = (light[i - 1, j].present
+                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                            * (light[i - 1, j].future - light[i, j].present)
+                                            )
         if j == 0:
-            future[i, j] = (present[i, j + 1]
-                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                            * (future[i, j + 1] - present[i, j])
-                            )
+            light[i, j].future = (light[i, j + 1].present
+                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                            * (light[i, j + 1].future - light[i, j].present)
+                                            )
         elif j == ny - 1:
-            future[i, j] = (present[i, j - 1]
-                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
-                            * (future[i, j - 1] - present[i, j])
-                            )
+            light[i, j].future = (light[i, j - 1].present
+                                            + (kappa[i, j] - 1) / (kappa[i, j] + 1)
+                                            * (light[i, j - 1].future - light[i, j].present)
+                                            )
 
 
 @ti.func
 def accumulate():
     for i, j in pixels:
         if 0 < i < nx - 1 and 0 < j < ny - 1:
-            pixels[i, j] += acc * ti.abs(ahead[i, j]) * kappa[i, j] / (c * dt / h)
+            pixels[i, j] += acc * ti.abs(light[i, j].future) * kappa[i, j] / (c * dt / h)
             # pixels[i, j] = kappa[i, j]
 
 
