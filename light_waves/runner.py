@@ -1,8 +1,9 @@
 import taichi as ti
 import taichi_glsl as ts
 import numpy as np
+from tqdm import tqdm
 
-from triangular_lens import setup
+from lens_model import setup
 
 
 ti.init(arch=ti.cpu)
@@ -16,8 +17,8 @@ dt = h / (c * 1.5)  # временной шаг
 acc = 0.1           # вес кадра для аккумулятора
 n = np.array([      # коэффициент преломления
     1.20,           # R
-    1.30,           # G
-    1.40            # B
+    1.25,           # G
+    1.30            # B
 ])
 
 
@@ -44,34 +45,29 @@ light.from_numpy(filler)
 
 @ti.func
 def propagate():
-    """
-    Один шаг интегрирования уравнений распространения волны по Эйлеру
-    """
+    """One step of integrating the Euler equations for numerical refraction modelling"""
     for x, y in light:
-        if x != 0 and y != 0 and x != nx and y != ny:
-            light[x, y].ahead = kappa[x, y] ** 2 * (
-                    light[x - 1, y].future +
-                    light[x + 1, y].future +
-                    light[x, y - 1].future +
-                    light[x, y + 1].future -
-                    4 * light[x, y].future
-            ) + 2 * light[x, y].future - light[x, y].present
+        light[x, y].ahead = kappa[x, y] ** 2 * (
+                light[x - 1, y].future +
+                light[x + 1, y].future +
+                light[x, y - 1].future +
+                light[x, y + 1].future -
+                4 * light[x, y].future
+        ) + 2 * light[x, y].future - light[x, y].present
 
 
 @ti.func
 def time_shift():
+    """Shift arrays of points for one step forward in time"""
     for x, y in light:
-        if x != 0 and y != 0 and x != nx and y != ny:
-            light[x, y].past = light[x, y].present
-            light[x, y].present = light[x, y].future
-            light[x, y].future = light[x, y].ahead
+        light[x, y].past = light[x, y].present
+        light[x, y].present = light[x, y].future
+        light[x, y].future = light[x, y].ahead
 
 
 @ti.func
 def open_boundary():
-    """
-    Граничные условия открытой границы
-    """
+    """Boundary conditions of open boundary for model of wave refraction"""
     for i, j in light:
         if i == 0:
             light[i, j].future = (light[i + 1, j].present
@@ -97,6 +93,7 @@ def open_boundary():
 
 @ti.func
 def accumulate():
+    """Accumulate the light movement in time and visualize it via Taichi GUI"""
     for i, j in pixels:
         if 0 < i < nx - 1 and 0 < j < ny - 1:
             pixels[i, j] += acc * ti.abs(light[i, j].future) * kappa[i, j] / (c * dt / h)
@@ -105,11 +102,21 @@ def accumulate():
 
 @ti.kernel
 def render():
+    """Kernel for refraction model with Euler equations, implemented in Taichi"""
     open_boundary()
     propagate()
     time_shift()
     accumulate()
 
+
+# video_manager = ti.tools.VideoManager(output_dir="./angled_by_axis", framerate=60, automatic_build=False)
+#
+# for i in tqdm(range(2700)):
+#     render()
+#     img = pixels.to_numpy()[:, :-1, :]
+#     video_manager.write_frame(img)
+#
+# video_manager.make_video(gif=False, mp4=True)
 
 gui = ti.GUI("Light Refraction", res=res, fast_gui=True)
 
@@ -120,5 +127,4 @@ while gui.running:
     render()
     gui.set_image(pixels)
     gui.show()
-
 gui.close()
