@@ -24,6 +24,7 @@ jupyterlab = "^3.6.3"
 taichi = "^1.5.0"
 taichi-glsl = "^0.0.12"
 holoviews = {extras = ["recommended"], version = "^1.15.4"}
+pyqt6 = "^6.5.1"
 
 
 [build-system]
