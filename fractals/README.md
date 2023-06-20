@@ -1,19 +1,15 @@
-# Интерактивная карта фрактала Ляпунова
+# Interactive map for Lyapunov's fractal
 
-### Условие задачи
+## Description 
+* Fractals are geometric shapes containing detailed structure at arbitrarily small scales. Some of them are defined as an extension of different maps.
+* In this notebook, interactive map is used to explore the [Lyapunov Fractal](https://en.wikipedia.org/wiki/Lyapunov_fractal).
+* The fractal image is calculated with set precision each time the map is moved, so you can explore the fractal without needing it be ready ahead of time.
 
-**Дано**
+<img src="https://github.com/rmnigm/py-cp3/blob/a127e9d632da4670ef6a536b1521fbae8e8f6880/fractals/fractal.png" width=700>
 
-- [фрактал Ляпунова](https://ru.wikipedia.org/wiki/Фрактал_Ляпунова) - BBBBBBAAAAAA
-- Обозначение $\lambda$ - экспонента Ляпунова.
-
-**Задача**
-
-- реализовать функции и откомпилировать их при помощи модуля `Numba`:
-   - расчет $\lambda$ для точки на комплексной плоскости
-   - расчет $\lambda$ на регулярной решетке на комплексной плоскости (параллелизм с применением `prange`)
-
-- создать интерактивную карту при помощи класса `DynamicMap` модуля `holoviews`:
-   - цветом отобразить значение $\lambda$
-   - размеры карты - не менее 600 х 600 точек
-   - отрегулировать количество итераций так, чтобы время вычисления одного обновления карты было менее 1 секунды
+## Hot to run
+* Just run the notebook with **Poetry Python kernel**: 
+```(bash)
+- poetry run jupyter notebook
+```
+* If errors occur, the best idea is to clear the viewer cache for JS-based **holoviews** and update the page.
