@@ -9,7 +9,7 @@ The orthogonal Procrustes problem is a matrix approximation problem in linear al
 $\Omega$ which most closely maps A to B. The approach can be used to transform the figures and check whether they are similar or not.
 
 **Some links:**
-- [Procrustes_analysis](https://en.wikipedia.org/wiki/Procrustes_analysis)
-- [Orthogonal_Procrustes_problem](https://en.wikipedia.org/wiki/Orthogonal_Procrustes_problem)
-- [PCA](https://ru.wikipedia.org/wiki/Метод_главных_компонент)
+- [Procrustes analysis](https://en.wikipedia.org/wiki/Procrustes_analysis)
+- [Orthogonal Procrustes problem](https://en.wikipedia.org/wiki/Orthogonal_Procrustes_problem)
+- [Principal component analysis](https://ru.wikipedia.org/wiki/Principal_component_analysis)
 - [Clustering](https://scikit-learn.org/stable/modules/clustering.html)
