@@ -3,15 +3,14 @@
 This is a repository containing numerical algorithms in Python for mathematical modelling.
 The task author is Stanislav Alekseevich Bober, teacher of [Python course](https://www.hse.ru/edu/courses/646488730) at HSE University.
 
-Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model and different visualizations. And they are really pretty!
-
-<img src="https://github.com/rmnigm/py-cp3/blob/84d14af3215326c199e3de8dd29fa45a3a3361f1/shaders/noisy_halo.gif?raw=true" height="360px" width="640px">
-
-<img src="https://github.com/rmnigm/py-cp3/blob/cf0608507ed546e970d109d7fad81d28542f9336/light_waves/light.gif?raw=true" height="360px" width="640px">
+Tasks are mostly computationally complex problems from physics or mathematical modelling, which require creating a high-performance model.
+Two parallel computation frameworks for Python are mostly used to speed up the models - **Taichi** and **Numba**.
+For almost all tasks, different visualizations are useful to understand the process. And they are really pretty!
 
 ## Models and implementations
-- Light waves refraction with **Taichi**
-- Shaders and computer graphics with **Taichi**
+- Numerical integration of constrained three-body problem
+- Light waves refraction
+- Shaders and computer graphics
 - Boids 2D spatial imitational model of agent behavior
 - Heat transfer modelling in 2-dimensional space
 - Ferromagnetic energy Izing model
