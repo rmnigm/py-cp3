@@ -7,15 +7,15 @@ Tasks are mostly computationally complex problems from physics or mathematical m
 Two parallel computation frameworks for Python are mostly used to speed up the models - **Taichi** and **Numba**.
 For almost all tasks, different visualizations are useful to understand the process. And they are really pretty!
 
-## Models and implementations
-- Numerical integration of constrained three-body problem
-- Light waves refraction
-- Shaders and computer graphics
-- Boids 2D spatial imitational model of agent behavior
-- Heat transfer modelling in 2-dimensional space
-- Ferromagnetic energy Izing model
-- Lyapunov's fractal interactive map
-- Procrustes analysis for sets of 3-dimensional figures
+## Models list
+- [Numerical integration of constrained three-body problem](unstable_orbits)
+- [Light waves refraction](light_waves)
+- [Shaders and computer graphics](shaders)
+- [Boids 2D spatial imitational model of agent behavior](boids)
+- [Heat transfer modelling in 2-dimensional space](heat_transfer)
+- [Ferromagnetic energy Izing model](ferromagnetic)
+- [Lyapunov's fractal interactive map](fractals)
+- [Procrustes analysis for sets of 3-dimensional figures](procrustes)
 
 ## How to setup (Unix)
 - Clone repository to local machine
