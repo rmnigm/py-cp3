@@ -13,7 +13,7 @@ First of all get familiar with `config.py` file - it sets all the useful model p
 
 After that, you could just run it from root of repository.
 ```(bash)
-(pycp_env)$ python boids/main.py
+$  poetry run python boids/main.py
 ```
 
 ## 
