@@ -234,13 +234,22 @@ def flocking(boids: np.ndarray,
              perception: float,
              coeffs: np.ndarray,
              asp: float,
-             v_range: tuple) -> None:
+             v_range: tuple,
+             angle_cos: float = 0.0) -> None:
     """
     Implements boids visibility computation and acceleration computation via four different
-    components - cohesion, alignment, separation, noise within sector of certain radius and angle
+    components - cohesion, alignment, separation, noise within sector of certain radius and angle.
+    
+    Args:
+        boids: Array of boids (shape: n x 6)
+        perception: Maximum visibility distance
+        coeffs: Coefficients for [cohesion, alignment, separation, walls, noise]
+        asp: Aspect ratio of simulation area
+        v_range: Velocity range tuple (min, max)
+        angle_cos: Cosine of half-angle for visibility sector (0.0 = 90°, -1.0 = 180°)
     """
     n = boids.shape[0]
-    mask = visibility(boids, perception, 0)
+    mask = visibility(boids, perception, angle_cos)
     wal = walls(boids, asp)
     for i in prange(n):
         if not np.any(mask[i]):
@@ -270,9 +279,20 @@ def simulation_step(boids: np.ndarray,
                     perception: float,
                     coefficients: np.ndarray,
                     v_range: tuple,
-                    dt: float) -> None:
-    """Implements full step of boids model simulation with updating their positions and propagation"""
-    flocking(boids, perception, coefficients, asp, v_range)
+                    dt: float,
+                    angle_cos: float = 0.0) -> None:
+    """Implements full step of boids model simulation with updating their positions and propagation.
+    
+    Args:
+        boids: Array of boids
+        asp: Aspect ratio of simulation area
+        perception: Maximum visibility distance
+        coefficients: Coefficients for flocking behavior
+        v_range: Velocity range tuple (min, max)
+        dt: Time step
+        angle_cos: Cosine of half-angle for visibility sector
+    """
+    flocking(boids, perception, coefficients, asp, v_range, angle_cos)
     propagate(boids, dt, v_range)
     periodic_walls(boids, asp)
     wall_avoidance(boids, asp)
@@ -283,19 +303,68 @@ def simulation_step(boids: np.ndarray,
 # +---------------------------------------------------+ #
 
 @njit()
-def visibility_cross(boids1: np.ndarray, boids2: np.ndarray, perception: float) -> np.ndarray:
-    """Calculates visibility mask between two different groups of boids within perception radius"""
+def angle_to_cos(angle_deg: float) -> float:
+    """Convert angle in degrees to cosine value for visibility calculation.
+    
+    The angle represents the half-angle of the visibility sector.
+    For example, angle_deg=90 means a 180° total sector (front half).
+    
+    Args:
+        angle_deg: Half-angle of the sector in degrees (90-270)
+        
+    Returns:
+        Cosine of the angle for comparison with dot product
+    """
+    return np.cos(np.radians(angle_deg))
+
+
+@njit()
+def visibility_cross(boids1: np.ndarray, boids2: np.ndarray, 
+                     perception: float, angle_cos: float = -1.0) -> np.ndarray:
+    """Calculates visibility mask between two different groups of boids.
+    
+    Visibility is determined by:
+    1. Distance within perception radius
+    2. Angle within the visibility sector (oriented along velocity vector)
+    
+    Args:
+        boids1: First group of boids (shape: n1 x 6)
+        boids2: Second group of boids (shape: n2 x 6)
+        perception: Maximum visibility distance
+        angle_cos: Cosine of half-angle for visibility sector (-1.0 = 360° visibility)
+        
+    Returns:
+        Boolean mask of shape (n1, n2) indicating which boids2 are visible to each boids1
+    """
     p1 = boids1[:, :2]
     p2 = boids2[:, :2]
+    s1 = boids1[:, 2:4]  # velocities of boids1
     n1 = p1.shape[0]
     n2 = p2.shape[0]
     mask = np.zeros((n1, n2), dtype=np.bool_)
+    
     for i in range(n1):
+        # Calculate normalized velocity direction for boids1[i]
+        speed_norm = np.sqrt(s1[i, 0]**2 + s1[i, 1]**2)
+        if speed_norm > 0:
+            speed_dir = s1[i] / speed_norm
+        else:
+            speed_dir = np.array([0.0, 0.0])
+        
         for j in range(n2):
-            v = p1[i] - p2[j]
-            d = np.sqrt(v @ v)
-            if d < perception:
-                mask[i, j] = True
+            # Direction FROM boids1[i] TO boids2[j]
+            v = p2[j] - p1[i]
+            d = np.sqrt(v[0]**2 + v[1]**2)
+            
+            if d < perception and d > 0:
+                if angle_cos <= -0.9999:  # 360° visibility (angle >= 180°)
+                    mask[i, j] = True
+                else:
+                    # Check if within visibility sector
+                    v_norm = v / d
+                    dot = speed_dir[0] * v_norm[0] + speed_dir[1] * v_norm[1]
+                    if dot > angle_cos:
+                        mask[i, j] = True
     return mask
 
 
@@ -317,19 +386,40 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
                      perception: float,
                      prey_coeffs: np.ndarray, pred_coeffs: np.ndarray,
                      pred_to_prey_attraction: float, prey_to_predator_avoidance: float,
-                     asp: float, v_range: tuple) -> None:
-    """Implements flocking behavior for both prey and predator boids with cross-species interactions"""
+                     asp: float, v_range: tuple,
+                     angle_cos: float = 0.0,
+                     angle_prey_pred_cos: float = -1.0,
+                     angle_pred_prey_cos: float = -1.0) -> None:
+    """Implements flocking behavior for both prey and predator boids with cross-species interactions.
+    
+    Uses sector-based visibility where agents can only see others within a cone oriented
+    along their velocity vector.
+    
+    Args:
+        prey: Array of prey boids (shape: n_prey x 6)
+        predators: Array of predator boids (shape: n_pred x 6)
+        perception: Maximum visibility distance
+        prey_coeffs: Coefficients for prey flocking behavior
+        pred_coeffs: Coefficients for predator flocking behavior
+        pred_to_prey_attraction: Attraction strength of predators to prey
+        prey_to_predator_avoidance: Avoidance strength of prey from predators
+        asp: Aspect ratio of the simulation area
+        v_range: Velocity range tuple (min, max)
+        angle_cos: Cosine of half-angle for same-species visibility sector
+        angle_prey_pred_cos: Cosine of half-angle for prey seeing predators
+        angle_pred_prey_cos: Cosine of half-angle for predators seeing prey
+    """
     n_prey = prey.shape[0]
     n_pred = predators.shape[0]
     
-    # Visibility within prey group
-    mask_prey = visibility(prey, perception, 0)
-    # Visibility within predator group
-    mask_pred = visibility(predators, perception, 0)
+    # Visibility within prey group (same-species angle)
+    mask_prey = visibility(prey, perception, angle_cos)
+    # Visibility within predator group (same-species angle)
+    mask_pred = visibility(predators, perception, angle_cos)
     # Cross-visibility: predators seeing prey
-    pred_see_prey = visibility_cross(predators, prey, perception)
+    pred_see_prey = visibility_cross(predators, prey, perception, angle_pred_prey_cos)
     # Cross-visibility: prey seeing predators
-    prey_see_pred = visibility_cross(prey, predators, perception)
+    prey_see_pred = visibility_cross(prey, predators, perception, angle_prey_pred_cos)
     
     # Wall forces
     wal_prey = walls(prey, asp)
@@ -400,12 +490,31 @@ def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
                             asp: float, perception: float,
                             prey_coeffs: np.ndarray, pred_coeffs: np.ndarray,
                             pred_to_prey_attraction: float, prey_to_predator_avoidance: float,
-                            v_range: tuple, dt: float) -> None:
-    """Implements full step of hunters/prey simulation with updating positions and propagation"""
+                            v_range: tuple, dt: float,
+                            angle_cos: float = 0.0,
+                            angle_prey_pred_cos: float = -1.0,
+                            angle_pred_prey_cos: float = -1.0) -> None:
+    """Implements full step of hunters/prey simulation with updating positions and propagation.
+    
+    Args:
+        prey: Array of prey boids
+        predators: Array of predator boids
+        asp: Aspect ratio of simulation area
+        perception: Maximum visibility distance
+        prey_coeffs: Coefficients for prey flocking behavior
+        pred_coeffs: Coefficients for predator flocking behavior
+        pred_to_prey_attraction: Attraction strength of predators to prey
+        prey_to_predator_avoidance: Avoidance strength of prey from predators
+        v_range: Velocity range tuple (min, max)
+        dt: Time step
+        angle_cos: Cosine of half-angle for same-species visibility
+        angle_prey_pred_cos: Cosine of half-angle for prey seeing predators
+        angle_pred_prey_cos: Cosine of half-angle for predators seeing prey
+    """
     flocking_hunters(prey, predators, perception,
                      prey_coeffs, pred_coeffs,
                      pred_to_prey_attraction, prey_to_predator_avoidance,
-                     asp, v_range)
+                     asp, v_range, angle_cos, angle_prey_pred_cos, angle_pred_prey_cos)
     propagate(prey, dt, v_range)
     propagate(predators, dt, v_range)
     periodic_walls(prey, asp)

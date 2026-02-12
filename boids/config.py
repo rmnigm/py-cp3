@@ -39,3 +39,20 @@ prey_to_predator_avoidance = 35   # Prey avoid predators
 # Colors for visualization (RGBA tuples, 0-1 range)
 prey_color = (0, 1, 0, 1)       # Green for prey
 predator_color = (1, 0, 0, 1)   # Red for predators
+
+# Variant 3: Sector-based visibility angles (in degrees, 90-270)
+# The angle defines the half-angle of the visibility sector (total sector = 2 * angle)
+angle = 90                      # General visibility angle for same-species interactions
+angle_prey_see_pred = 90       # Angle for prey seeing predators
+angle_pred_see_prey = 90       # Angle for predators seeing prey
+
+# Visualization mode for visibility area
+# Options: "off" - disabled, "prey" - show for random prey, "predator" - show for random predator
+# Note: In standard mode (without hunters), "prey" or "predator" will show for a random boid
+visualize_angle = "prey"
+
+# Colors for visibility visualization (RGBA tuples, 0-1 range)
+visibility_area_color = (0.5, 0.5, 1.0, 0.4)      # Light blue, semi-transparent
+visible_prey_color = (0.8, 0.6, 1.0, 1.0)          # Light purple for visible prey
+visible_predator_color = (1.0, 0.6, 0.8, 1.0)      # Pink for visible predators
+visible_boid_color = (0.8, 0.6, 1.0, 1.0)          # Light purple for visible boids (standard mode)
