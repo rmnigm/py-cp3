@@ -17,6 +17,34 @@ def init_boids(boids: np.ndarray, asp: float, v_range: tuple = (0., 1.)) -> np.n
     return boids
 
 
+def init_boids_hunters(prey: np.ndarray, predators: np.ndarray, 
+                       asp: float, v_range: tuple = (0., 1.)) -> tuple:
+    """Initialize random prey and predator boids and their speeds from uniform distribution."""
+    # Initialize prey
+    n_prey = prey.shape[0]
+    rng = np.random.default_rng()
+    low, high = v_range
+    prey[:, 0] = rng.uniform(0., asp, size=n_prey)
+    prey[:, 1] = rng.uniform(0., 1., size=n_prey)
+    alpha_prey = rng.uniform(0, 2*np.pi, size=n_prey)
+    v_prey = rng.uniform(low=low, high=high, size=n_prey)
+    c_prey, s_prey = np.cos(alpha_prey), np.sin(alpha_prey)
+    prey[:, 2] = v_prey * c_prey
+    prey[:, 3] = v_prey * s_prey
+    
+    # Initialize predators
+    n_pred = predators.shape[0]
+    predators[:, 0] = rng.uniform(0., asp, size=n_pred)
+    predators[:, 1] = rng.uniform(0., 1., size=n_pred)
+    alpha_pred = rng.uniform(0, 2*np.pi, size=n_pred)
+    v_pred = rng.uniform(low=low, high=high, size=n_pred)
+    c_pred, s_pred = np.cos(alpha_pred), np.sin(alpha_pred)
+    predators[:, 2] = v_pred * c_pred
+    predators[:, 3] = v_pred * s_pred
+    
+    return prey, predators
+
+
 @njit()
 def directions(boids: np.ndarray, dt: float) -> np.ndarray:
     """Calculate directions for arrows in boids model by propagating with speed and acceleration"""
@@ -129,7 +157,7 @@ def distance(boids: np.ndarray) -> np.ndarray:
 def normalize(v):
     """Normalize vector to norm = 1"""
     v_norm = np.linalg.norm(v)
-    if norm == 0:
+    if v_norm == 0:
         return v
     return v / v_norm
 
@@ -248,3 +276,139 @@ def simulation_step(boids: np.ndarray,
     propagate(boids, dt, v_range)
     periodic_walls(boids, asp)
     wall_avoidance(boids, asp)
+
+
+# +---------------------------------------------------+ #
+# Implementation of hunters/prey variant of boids model #
+# +---------------------------------------------------+ #
+
+@njit()
+def visibility_cross(boids1: np.ndarray, boids2: np.ndarray, perception: float) -> np.ndarray:
+    """Calculates visibility mask between two different groups of boids within perception radius"""
+    p1 = boids1[:, :2]
+    p2 = boids2[:, :2]
+    n1 = p1.shape[0]
+    n2 = p2.shape[0]
+    mask = np.zeros((n1, n2), dtype=np.bool_)
+    for i in range(n1):
+        for j in range(n2):
+            v = p1[i] - p2[j]
+            d = np.sqrt(v @ v)
+            if d < perception:
+                mask[i, j] = True
+    return mask
+
+
+@njit()
+def separation_cross(boids1: np.ndarray, idx: int, boids2: np.ndarray,
+                     cross_mask: np.ndarray) -> np.ndarray:
+    """Calculates separation acceleration between boids of different groups"""
+    if not np.any(cross_mask):
+        return np.zeros(2)
+    
+    # Calculate median position of visible boids from other group
+    visible_pos = boids2[cross_mask, :2]
+    d = median_axis(visible_pos - boids1[idx, :2], axis=0)
+    return -d / ((d[0]**2 + d[1]**2) + 1)
+
+
+@njit(parallel=True)
+def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
+                     perception: float,
+                     prey_coeffs: np.ndarray, pred_coeffs: np.ndarray,
+                     pred_to_prey_attraction: float, prey_to_predator_avoidance: float,
+                     asp: float, v_range: tuple) -> None:
+    """Implements flocking behavior for both prey and predator boids with cross-species interactions"""
+    n_prey = prey.shape[0]
+    n_pred = predators.shape[0]
+    
+    # Visibility within prey group
+    mask_prey = visibility(prey, perception, 0)
+    # Visibility within predator group
+    mask_pred = visibility(predators, perception, 0)
+    # Cross-visibility: predators seeing prey
+    pred_see_prey = visibility_cross(predators, prey, perception)
+    # Cross-visibility: prey seeing predators
+    prey_see_pred = visibility_cross(prey, predators, perception)
+    
+    # Wall forces
+    wal_prey = walls(prey, asp)
+    wal_pred = walls(predators, asp)
+    
+    # Update prey
+    for i in prange(n_prey):
+        # Standard flocking with other prey
+        if not np.any(mask_prey[i]):
+            coh = np.zeros(2)
+            alg = np.zeros(2)
+            sep_prey = np.zeros(2)
+        else:
+            coh = cohesion(prey, i, mask_prey[i], perception)
+            alg = alignment(prey, i, mask_prey[i], v_range)
+            sep_prey = separation(prey, i, mask_prey[i])
+        
+        # Separation from predators (increased - avoidance)
+        sep_pred = separation_cross(prey, i, predators, prey_see_pred[i])
+        
+        ns = noise()
+        
+        prey[i, 4] = (prey_coeffs[0] * coh[0]
+                      + prey_coeffs[1] * alg[0]
+                      + prey_coeffs[2] * sep_prey[0]
+                      + prey_coeffs[3] * wal_prey[i][0]
+                      + prey_coeffs[4] * ns[0]
+                      + prey_to_predator_avoidance * sep_pred[0])
+        prey[i, 5] = (prey_coeffs[0] * coh[1]
+                      + prey_coeffs[1] * alg[1]
+                      + prey_coeffs[2] * sep_prey[1]
+                      + prey_coeffs[3] * wal_prey[i][1]
+                      + prey_coeffs[4] * ns[1]
+                      + prey_to_predator_avoidance * sep_pred[1])
+    
+    # Update predators
+    for i in prange(n_pred):
+        # Reduced flocking with other predators
+        if not np.any(mask_pred[i]):
+            coh = np.zeros(2)
+            alg = np.zeros(2)
+            sep_pred = np.zeros(2)
+        else:
+            coh = cohesion(predators, i, mask_pred[i], perception)
+            alg = alignment(predators, i, mask_pred[i], v_range)
+            sep_pred = separation(predators, i, mask_pred[i])
+        
+        # Separation from prey (reduced - attraction/chase)
+        sep_prey = separation_cross(predators, i, prey, pred_see_prey[i])
+        
+        ns = noise()
+        
+        predators[i, 4] = (pred_coeffs[0] * coh[0]
+                           + pred_coeffs[1] * alg[0]
+                           + pred_coeffs[2] * sep_pred[0]
+                           + pred_coeffs[3] * wal_pred[i][0]
+                           + pred_coeffs[4] * ns[0]
+                           + pred_to_prey_attraction * sep_prey[0])
+        predators[i, 5] = (pred_coeffs[0] * coh[1]
+                           + pred_coeffs[1] * alg[1]
+                           + pred_coeffs[2] * sep_pred[1]
+                           + pred_coeffs[3] * wal_pred[i][1]
+                           + pred_coeffs[4] * ns[1]
+                           + pred_to_prey_attraction * sep_prey[1])
+
+
+def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
+                            asp: float, perception: float,
+                            prey_coeffs: np.ndarray, pred_coeffs: np.ndarray,
+                            pred_to_prey_attraction: float, prey_to_predator_avoidance: float,
+                            v_range: tuple, dt: float) -> None:
+    """Implements full step of hunters/prey simulation with updating positions and propagation"""
+    flocking_hunters(prey, predators, perception,
+                     prey_coeffs, pred_coeffs,
+                     pred_to_prey_attraction, prey_to_predator_avoidance,
+                     asp, v_range)
+    propagate(prey, dt, v_range)
+    propagate(predators, dt, v_range)
+    periodic_walls(prey, asp)
+    periodic_walls(predators, asp)
+    wall_avoidance(prey, asp)
+    wall_avoidance(predators, asp)
