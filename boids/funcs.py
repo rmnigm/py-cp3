@@ -163,10 +163,23 @@ def normalize(v):
 
 
 @njit()
-def visibility(boids: np.ndarray, perception: float, angle: float) -> np.ndarray:
+def visibility(boids: np.ndarray, perception: float, angle: float, 
+               max_neighbours: int = -1) -> np.ndarray:
     """
     Calculates pairwise euclidean distance between boids, angles and returns mask of visibility,
-    implements a sector of angle width = (-arccos(angle), arccos(angle)) and radius = perception
+    implements a sector of angle width = (-arccos(angle), arccos(angle)) and radius = perception.
+    
+    When max_neighbours > 0, limits the visibility mask to only include the max_neighbours
+    nearest neighbours for each boid.
+    
+    Args:
+        boids: Array of boids (shape: n x 6)
+        perception: Maximum visibility distance
+        angle: Cosine of half-angle for visibility sector
+        max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
+        
+    Returns:
+        Boolean mask of shape (n, n) indicating visibility
     """
     vectors = boids[:, :2]
     speeds = boids[:, 2:4]
@@ -184,6 +197,40 @@ def visibility(boids: np.ndarray, perception: float, angle: float) -> np.ndarray
     angle_mask = angles > angle
     mask = np.logical_and(distance_mask, angle_mask)
     np.fill_diagonal(mask, False)
+    
+    # Limit to max_neighbours nearest if specified
+    if max_neighbours > 0:
+        limited_mask = np.zeros((n, n), dtype=np.bool_)
+        for i in range(n):
+            visible_indices = np.where(mask[i])[0]
+            num_visible = len(visible_indices)
+            
+            if num_visible == 0:
+                continue
+            
+            if num_visible <= max_neighbours:
+                limited_mask[i, visible_indices] = True
+            else:
+                # Select max_neighbours nearest by distance
+                visible_distances = dist[i, visible_indices]
+                selected_count = 0
+                used = np.zeros(num_visible, dtype=np.bool_)
+                
+                while selected_count < max_neighbours:
+                    min_dist = np.inf
+                    min_idx = -1
+                    for j in range(num_visible):
+                        if not used[j] and visible_distances[j] < min_dist:
+                            min_dist = visible_distances[j]
+                            min_idx = j
+                    if min_idx >= 0:
+                        limited_mask[i, visible_indices[min_idx]] = True
+                        used[min_idx] = True
+                        selected_count += 1
+                    else:
+                        break
+        mask = limited_mask
+    
     return mask
 
 
@@ -239,7 +286,8 @@ def flocking(boids: np.ndarray,
              angle_cos: float = 0.0,
              obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
              repel_strength: float = 0.0,
-             attract_strength: float = 0.0) -> None:
+             attract_strength: float = 0.0,
+             max_neighbours: int = -1) -> None:
     """
     Implements boids visibility computation and acceleration computation via four different
     components - cohesion, alignment, separation, noise within sector of certain radius and angle.
@@ -255,9 +303,10 @@ def flocking(boids: np.ndarray,
         obstacles: Array of obstacles (shape: n_obstacles x 4) with [x, y, radius, type], optional
         repel_strength: Strength of repelling obstacle force, optional
         attract_strength: Strength of attracting obstacle force, optional
+        max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
     """
     n = boids.shape[0]
-    mask = visibility(boids, perception, angle_cos)
+    mask = visibility(boids, perception, angle_cos, max_neighbours)
     wal = walls(boids, asp)
     has_obstacles = obstacles.shape[0] > 0
     
@@ -304,7 +353,8 @@ def simulation_step(boids: np.ndarray,
                     angle_cos: float = 0.0,
                     obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
                     repel_strength: float = 0.0,
-                    attract_strength: float = 0.0) -> None:
+                    attract_strength: float = 0.0,
+                    max_neighbours: int = -1) -> None:
     """Implements full step of boids model simulation with updating their positions and propagation.
     Optionally includes obstacle interactions.
     
@@ -312,6 +362,7 @@ def simulation_step(boids: np.ndarray,
         boids: Array of boids
         asp: Aspect ratio of simulation area
         perception: Maximum visibility distance
+        cohesion_strength: Strength of cohesion force
         coefficients: Coefficients for flocking behavior
         v_range: Velocity range tuple (min, max)
         dt: Time step
@@ -319,9 +370,10 @@ def simulation_step(boids: np.ndarray,
         obstacles: Array of obstacles (shape: n_obstacles x 4), optional
         repel_strength: Strength of repelling obstacle force, optional
         attract_strength: Strength of attracting obstacle force, optional
+        max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
     """
     flocking(boids, perception, cohesion_strength, coefficients, asp, v_range, angle_cos,
-             obstacles, repel_strength, attract_strength)
+             obstacles, repel_strength, attract_strength, max_neighbours)
     propagate(boids, dt, v_range)
     periodic_walls(boids, asp)
     wall_avoidance(boids, asp)
@@ -349,18 +401,23 @@ def angle_to_cos(angle_deg: float) -> float:
 
 @njit()
 def visibility_cross(boids1: np.ndarray, boids2: np.ndarray, 
-                     perception: float, angle_cos: float = -1.0) -> np.ndarray:
+                     perception: float, angle_cos: float = -1.0,
+                     max_neighbours: int = -1) -> np.ndarray:
     """Calculates visibility mask between two different groups of boids.
     
     Visibility is determined by:
     1. Distance within perception radius
     2. Angle within the visibility sector (oriented along velocity vector)
     
+    When max_neighbours > 0, limits the visibility mask to only include the max_neighbours
+    nearest neighbours for each boid.
+    
     Args:
         boids1: First group of boids (shape: n1 x 6)
         boids2: Second group of boids (shape: n2 x 6)
         perception: Maximum visibility distance
         angle_cos: Cosine of half-angle for visibility sector (-1.0 = 360° visibility)
+        max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
         
     Returns:
         Boolean mask of shape (n1, n2) indicating which boids2 are visible to each boids1
@@ -371,6 +428,7 @@ def visibility_cross(boids1: np.ndarray, boids2: np.ndarray,
     n1 = p1.shape[0]
     n2 = p2.shape[0]
     mask = np.zeros((n1, n2), dtype=np.bool_)
+    dist = np.zeros((n1, n2), dtype=np.float64)
     
     for i in range(n1):
         # Calculate normalized velocity direction for boids1[i]
@@ -384,6 +442,7 @@ def visibility_cross(boids1: np.ndarray, boids2: np.ndarray,
             # Direction FROM boids1[i] TO boids2[j]
             v = p2[j] - p1[i]
             d = np.sqrt(v[0]**2 + v[1]**2)
+            dist[i, j] = d
             
             if d < perception and d > 0:
                 if angle_cos <= -0.9999:  # 360° visibility (angle >= 180°)
@@ -394,6 +453,40 @@ def visibility_cross(boids1: np.ndarray, boids2: np.ndarray,
                     dot = speed_dir[0] * v_norm[0] + speed_dir[1] * v_norm[1]
                     if dot > angle_cos:
                         mask[i, j] = True
+    
+    # Limit to max_neighbours nearest if specified
+    if max_neighbours > 0:
+        limited_mask = np.zeros((n1, n2), dtype=np.bool_)
+        for i in range(n1):
+            visible_indices = np.where(mask[i])[0]
+            num_visible = len(visible_indices)
+            
+            if num_visible == 0:
+                continue
+            
+            if num_visible <= max_neighbours:
+                limited_mask[i, visible_indices] = True
+            else:
+                # Select max_neighbours nearest by distance
+                visible_distances = dist[i, visible_indices]
+                selected_count = 0
+                used = np.zeros(num_visible, dtype=np.bool_)
+                
+                while selected_count < max_neighbours:
+                    min_dist = np.inf
+                    min_idx = -1
+                    for j in range(num_visible):
+                        if not used[j] and visible_distances[j] < min_dist:
+                            min_dist = visible_distances[j]
+                            min_idx = j
+                    if min_idx >= 0:
+                        limited_mask[i, visible_indices[min_idx]] = True
+                        used[min_idx] = True
+                        selected_count += 1
+                    else:
+                        break
+        mask = limited_mask
+    
     return mask
 
 
@@ -422,7 +515,8 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
                      angle_pred_prey_cos: float = -1.0,
                      obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
                      repel_strength: float = 0.0,
-                     attract_strength: float = 0.0) -> None:
+                     attract_strength: float = 0.0,
+                     max_neighbours: int = -1) -> None:
     """Implements flocking behavior for both prey and predator boids with cross-species interactions.
     Optionally includes obstacle interactions.
     
@@ -445,18 +539,19 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
         obstacles: Array of obstacles (shape: n_obstacles x 4), optional
         repel_strength: Strength of repelling obstacle force, optional
         attract_strength: Strength of attracting obstacle force, optional
+        max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
     """
     n_prey = prey.shape[0]
     n_pred = predators.shape[0]
     
     # Visibility within prey group (same-species angle)
-    mask_prey = visibility(prey, perception, angle_cos)
+    mask_prey = visibility(prey, perception, angle_cos, max_neighbours)
     # Visibility within predator group (same-species angle)
-    mask_pred = visibility(predators, perception, angle_cos)
+    mask_pred = visibility(predators, perception, angle_cos, max_neighbours)
     # Cross-visibility: predators seeing prey
-    pred_see_prey = visibility_cross(predators, prey, perception, angle_pred_prey_cos)
+    pred_see_prey = visibility_cross(predators, prey, perception, angle_pred_prey_cos, max_neighbours)
     # Cross-visibility: prey seeing predators
-    prey_see_pred = visibility_cross(prey, predators, perception, angle_prey_pred_cos)
+    prey_see_pred = visibility_cross(prey, predators, perception, angle_prey_pred_cos, max_neighbours)
     
     # Wall forces
     wal_prey = walls(prey, asp)
@@ -554,7 +649,8 @@ def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
                             angle_pred_prey_cos: float = -1.0,
                             obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
                             repel_strength: float = 0.0,
-                            attract_strength: float = 0.0) -> None:
+                            attract_strength: float = 0.0,
+                            max_neighbours: int = -1) -> None:
     """Implements full step of hunters/prey simulation with updating positions and propagation.
     Optionally includes obstacle interactions.
     
@@ -575,12 +671,13 @@ def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
         obstacles: Array of obstacles (shape: n_obstacles x 4), optional
         repel_strength: Strength of repelling obstacle force, optional
         attract_strength: Strength of attracting obstacle force, optional
+        max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
     """
     flocking_hunters(prey, predators, perception, cohesion_strength,
                      prey_coeffs, pred_coeffs,
                      pred_to_prey_attraction, prey_to_predator_avoidance,
                      asp, v_range, angle_cos, angle_prey_pred_cos, angle_pred_prey_cos,
-                     obstacles, repel_strength, attract_strength)
+                     obstacles, repel_strength, attract_strength, max_neighbours)
     propagate(prey, dt, v_range)
     propagate(predators, dt, v_range)
     periodic_walls(prey, asp)

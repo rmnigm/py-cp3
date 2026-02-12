@@ -60,7 +60,7 @@ visible_predator_color = (1.0, 0.6, 0.8, 1.0)      # Pink for visible predators
 visible_boid_color = (0.8, 0.6, 1.0, 1.0)          # Light purple for visible boids (standard mode)
 
 # Variant 2: Obstacles
-add_obstacles = True  # Enable/disable obstacles feature
+add_obstacles = False  # Enable/disable obstacles feature
 
 # Obstacles defined as list of (radius, type) pairs
 # type 0 = repelling (pushes agents away), 1 = attracting (pulls agents in)
@@ -79,3 +79,17 @@ obstacle_attract_strength = 0.01   # Strength of attracting force
 # Colors for obstacle visualization (RGBA tuples, 0-1 range)
 obstacle_repel_color = (1.0, 0.3, 0.3, 0.5)    # Red for repelling obstacles
 obstacle_attract_color = (0.3, 0.7, 1.0, 0.5)  # Blue for attracting obstacles
+
+# Variant 4: Maximum neighbours limit
+use_max_neighbours = False  # Enable/disable max neighbours feature
+max_neighbours = 5         # Maximum number of nearest neighbours to consider for interactions
+
+# Visualization mode for max neighbours
+# When enabled, highlights the max_neighbours nearest neighbours with a glow/circle
+visualize_max_neighbours = False
+
+# Colors for max neighbours visualization (RGBA tuples, 0-1 range)
+# These neighbours are used for interaction calculations
+max_neighbours_color = (1.0, 1.0, 0.0, 0.6)       # Yellow glow for max neighbours used in calculations
+# These are visible but not used (beyond max_neighbours limit)
+visible_not_used_color = (0.5, 0.5, 0.5, 0.3)     # Grey for visible but not used neighbours
