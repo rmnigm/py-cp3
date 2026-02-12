@@ -59,23 +59,25 @@ def norm(arr: np.ndarray):
 
 @njit()
 def mean_axis(arr, axis):
-    """Calculates mean over chosen axis, njit-compilable"""
+    """Calculates mean over chosen axis, njit-compilable.
+    Optimized to use sum instead of np.mean in loop."""
     assert arr.ndim == 2
     assert axis in [0, 1]
     if axis == 0:
         result = np.empty(arr.shape[1], dtype=arr.dtype)
         for i in range(len(result)):
-            result[i] = np.mean(arr[:, i])
+            result[i] = np.sum(arr[:, i]) / arr.shape[0]
     else:
         result = np.empty(arr.shape[0], dtype=arr.dtype)
         for i in range(len(result)):
-            result[i] = np.mean(arr[i, :])
+            result[i] = np.sum(arr[i, :]) / arr.shape[1]
     return result
 
 
 @njit()
 def median_axis(arr, axis):
-    """Calculates median over chosen axis, njit-compilable"""
+    """Calculates median over chosen axis, njit-compilable.
+    Uses np.median which is already optimized in numpy."""
     assert arr.ndim == 2
     assert axis in [0, 1]
     if axis == 0:
@@ -139,21 +141,6 @@ def walls(boids: np.ndarray, asp: float):
 
 
 @njit()
-def distance(boids: np.ndarray) -> np.ndarray:
-    """Calculates pairwise euclidean distance between boids"""
-    p = boids[:, :2]
-    n = p.shape[0]
-    dist = np.zeros(shape=(n, n), dtype=np.float64)
-    for i in range(n):
-        for j in range(n):
-            v = p[i] - p[j]
-            d = (v @ v)
-            dist[i, j] = d
-    dist = np.sqrt(dist)
-    return dist
-
-
-@njit()
 def normalize(v):
     """Normalize vector to norm = 1"""
     v_norm = np.linalg.norm(v)
@@ -211,24 +198,142 @@ def visibility(boids: np.ndarray, perception: float, angle: float,
             if num_visible <= max_neighbours:
                 limited_mask[i, visible_indices] = True
             else:
-                # Select max_neighbours nearest by distance
+                # Optimized: use argsort for O(n log n) instead of O(k*n)
                 visible_distances = dist[i, visible_indices]
-                selected_count = 0
-                used = np.zeros(num_visible, dtype=np.bool_)
+                k_smallest_indices = np.argpartition(visible_distances, max_neighbours-1)[:max_neighbours]
+                limited_mask[i, visible_indices[k_smallest_indices]] = True
+        mask = limited_mask
+    
+    return mask
+
+
+@njit()
+def visibility_spatial(boids: np.ndarray, perception: float, angle: float, 
+                       max_neighbours: int = -1, cell_size: float = 0.0) -> np.ndarray:
+    """
+    Optimized visibility calculation using spatial hashing for O(n) average complexity.
+    
+    Instead of checking all n² pairs, uses a grid-based spatial hash to only check
+    nearby boids within the perception radius.
+    
+    Args:
+        boids: Array of boids (shape: n x 6)
+        perception: Maximum visibility distance
+        angle: Cosine of half-angle for visibility sector
+        max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
+        cell_size: Size of spatial hash cells (default: perception)
+        
+    Returns:
+        Boolean mask of shape (n, n) indicating visibility
+    """
+    vectors = boids[:, :2]
+    speeds = boids[:, 2:4]
+    n = vectors.shape[0]
+    
+    # Use perception as cell size if not specified
+    if cell_size <= 0:
+        cell_size = perception
+    
+    # Calculate grid dimensions
+    x_min = 0.0
+    y_min = 0.0
+    x_max = np.max(vectors[:, 0]) + cell_size
+    y_max = np.max(vectors[:, 1]) + cell_size
+    
+    grid_w = int(np.ceil((x_max - x_min) / cell_size)) + 1
+    grid_h = int(np.ceil((y_max - y_min) / cell_size)) + 1
+    
+    # Assign boids to grid cells
+    # Using a simple approach: for each boid, store its cell index
+    cell_indices = np.empty((n, 2), dtype=np.int64)
+    for i in range(n):
+        cx = int((vectors[i, 0] - x_min) / cell_size)
+        cy = int((vectors[i, 1] - y_min) / cell_size)
+        cell_indices[i, 0] = cx
+        cell_indices[i, 1] = cy
+    
+    # Build cell contents using a flat array approach
+    # Each cell stores count and start index in a flat boid list
+    max_boids_per_cell = n  # Conservative estimate
+    cell_boids = np.full((grid_w * grid_h, max_boids_per_cell), -1, dtype=np.int64)
+    cell_counts = np.zeros(grid_w * grid_h, dtype=np.int64)
+    
+    for i in range(n):
+        cx = cell_indices[i, 0]
+        cy = cell_indices[i, 1]
+        cell_id = cy * grid_w + cx
+        idx = cell_counts[cell_id]
+        cell_boids[cell_id, idx] = i
+        cell_counts[cell_id] += 1
+    
+    # Initialize mask
+    mask = np.zeros((n, n), dtype=np.bool_)
+    
+    # For each boid, check only nearby cells
+    for i in range(n):
+        cx = cell_indices[i, 0]
+        cy = cell_indices[i, 1]
+        
+        # Normalize velocity for angle check
+        speed_norm = np.sqrt(speeds[i, 0]**2 + speeds[i, 1]**2)
+        if speed_norm > 0:
+            speed_dir = speeds[i] / speed_norm
+        else:
+            speed_dir = np.array([0.0, 0.0])
+        
+        # Check neighboring cells (3x3 grid around current cell)
+        for dcx in range(-1, 2):
+            for dcy in range(-1, 2):
+                ncx = cx + dcx
+                ncy = cy + dcy
                 
-                while selected_count < max_neighbours:
-                    min_dist = np.inf
-                    min_idx = -1
-                    for j in range(num_visible):
-                        if not used[j] and visible_distances[j] < min_dist:
-                            min_dist = visible_distances[j]
-                            min_idx = j
-                    if min_idx >= 0:
-                        limited_mask[i, visible_indices[min_idx]] = True
-                        used[min_idx] = True
-                        selected_count += 1
-                    else:
-                        break
+                # Skip out-of-bounds cells
+                if ncx < 0 or ncx >= grid_w or ncy < 0 or ncy >= grid_h:
+                    continue
+                
+                cell_id = ncy * grid_w + ncx
+                
+                # Check all boids in this cell
+                for k in range(cell_counts[cell_id]):
+                    j = cell_boids[cell_id, k]
+                    if j == i:
+                        continue
+                    
+                    # Calculate distance
+                    dx = vectors[j, 0] - vectors[i, 0]
+                    dy = vectors[j, 1] - vectors[i, 1]
+                    d = np.sqrt(dx * dx + dy * dy)
+                    
+                    if d < perception and d > 0:
+                        # Check angle
+                        v_norm = np.array([dx / d, dy / d])
+                        dot = speed_dir[0] * v_norm[0] + speed_dir[1] * v_norm[1]
+                        if dot > angle:
+                            mask[i, j] = True
+    
+    # Limit to max_neighbours nearest if specified
+    if max_neighbours > 0:
+        limited_mask = np.zeros((n, n), dtype=np.bool_)
+        for i in range(n):
+            visible_indices = np.where(mask[i])[0]
+            num_visible = len(visible_indices)
+            
+            if num_visible == 0:
+                continue
+            
+            if num_visible <= max_neighbours:
+                limited_mask[i, visible_indices] = True
+            else:
+                # Calculate distances for visible boids
+                visible_distances = np.empty(num_visible, dtype=np.float64)
+                for k in range(num_visible):
+                    j = visible_indices[k]
+                    dx = vectors[j, 0] - vectors[i, 0]
+                    dy = vectors[j, 1] - vectors[i, 1]
+                    visible_distances[k] = np.sqrt(dx * dx + dy * dy)
+                
+                k_smallest_indices = np.argpartition(visible_distances, max_neighbours-1)[:max_neighbours]
+                limited_mask[i, visible_indices[k_smallest_indices]] = True
         mask = limited_mask
     
     return mask
@@ -251,7 +356,11 @@ def separation(boids: np.ndarray,
                neigh_mask: np.ndarray) -> np.ndarray:
     """Implements separation component of acceleration via median within group in sector"""
     d = mean_axis(boids[neigh_mask, :2] - boids[idx, :2], axis=0)
-    return -d / (d[0]**2 + d[1]**2)
+    norm_sq = d[0]**2 + d[1]**2
+    # Protection against division by zero
+    if norm_sq < 1e-10:
+        return np.zeros(2)
+    return -d / norm_sq
 
 
 @njit()
@@ -267,13 +376,9 @@ def alignment(boids: np.ndarray,
 
 @njit()
 def noise():
-    """Implements of random noise in (-1, 1) interval for two coordinated, njit-compilable"""
-    arr = np.random.rand(2)
-    if np.random.rand(1) > .5:
-        arr[0] *= -1
-    if np.random.rand(1) > .5:
-        arr[1] *= -1
-    return arr
+    """Implements random noise in (-1, 1) interval for two coordinates, njit-compilable.
+    Optimized: single random call with direct range mapping."""
+    return np.random.rand(2) * 2.0 - 1.0
 
 
 @njit(parallel=True)
@@ -372,11 +477,13 @@ def simulation_step(boids: np.ndarray,
         attract_strength: Strength of attracting obstacle force, optional
         max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
     """
+    # wall_avoidance is called first to add wall force to acceleration
+    # before propagate uses it
+    wall_avoidance(boids, asp)
     flocking(boids, perception, cohesion_strength, coefficients, asp, v_range, angle_cos,
              obstacles, repel_strength, attract_strength, max_neighbours)
     propagate(boids, dt, v_range)
     periodic_walls(boids, asp)
-    wall_avoidance(boids, asp)
 
 
 # +---------------------------------------------------+ #
@@ -467,24 +574,10 @@ def visibility_cross(boids1: np.ndarray, boids2: np.ndarray,
             if num_visible <= max_neighbours:
                 limited_mask[i, visible_indices] = True
             else:
-                # Select max_neighbours nearest by distance
+                # Optimized: use argpartition for O(n) instead of O(k*n)
                 visible_distances = dist[i, visible_indices]
-                selected_count = 0
-                used = np.zeros(num_visible, dtype=np.bool_)
-                
-                while selected_count < max_neighbours:
-                    min_dist = np.inf
-                    min_idx = -1
-                    for j in range(num_visible):
-                        if not used[j] and visible_distances[j] < min_dist:
-                            min_dist = visible_distances[j]
-                            min_idx = j
-                    if min_idx >= 0:
-                        limited_mask[i, visible_indices[min_idx]] = True
-                        used[min_idx] = True
-                        selected_count += 1
-                    else:
-                        break
+                k_smallest_indices = np.argpartition(visible_distances, max_neighbours-1)[:max_neighbours]
+                limited_mask[i, visible_indices[k_smallest_indices]] = True
         mask = limited_mask
     
     return mask
@@ -673,6 +766,10 @@ def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
         attract_strength: Strength of attracting obstacle force, optional
         max_neighbours: Maximum number of nearest neighbours to consider (-1 = no limit)
     """
+    # wall_avoidance is called first to add wall force to acceleration
+    # before propagate uses it
+    wall_avoidance(prey, asp)
+    wall_avoidance(predators, asp)
     flocking_hunters(prey, predators, perception, cohesion_strength,
                      prey_coeffs, pred_coeffs,
                      pred_to_prey_attraction, prey_to_predator_avoidance,
@@ -682,8 +779,6 @@ def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
     propagate(predators, dt, v_range)
     periodic_walls(prey, asp)
     periodic_walls(predators, asp)
-    wall_avoidance(prey, asp)
-    wall_avoidance(predators, asp)
 
 
 # +---------------------------------------------------+ #

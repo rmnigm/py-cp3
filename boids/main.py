@@ -5,7 +5,13 @@ from vispy.geometry import Rect  # type: ignore
 from vispy.scene.visuals import Text, Mesh, Ellipse, Markers  # type: ignore
 
 import config as cfg
-from funcs import init_boids, directions, simulation_step, visibility, angle_to_cos
+from funcs import init_boids, directions, simulation_step, angle_to_cos
+
+# Import spatial hashing version if enabled
+if cfg.use_spatial_hash:
+    from funcs import visibility_spatial as visibility_func
+else:
+    from funcs import visibility as visibility_func
 
 if cfg.add_hunters:
     from funcs import init_boids_hunters, simulation_step_hunters, visibility_cross
@@ -53,14 +59,15 @@ def create_sector_mesh(pos: np.ndarray, speed: np.ndarray, perception: float,
     vertices = np.zeros((n_segments + 1, 3))  # 3D for Mesh (z=0)
     vertices[0, :2] = pos  # Center
     
-    for i, a in enumerate(angles):
-        vertices[i + 1, 0] = pos[0] + perception * np.cos(a)
-        vertices[i + 1, 1] = pos[1] + perception * np.sin(a)
+    # Vectorized: compute all arc points at once
+    vertices[1:, 0] = pos[0] + perception * np.cos(angles)
+    vertices[1:, 1] = pos[1] + perception * np.sin(angles)
     
     # Faces: triangles from center to consecutive arc points
     faces = np.zeros((n_segments - 1, 3), dtype=np.uint32)
-    for i in range(n_segments - 1):
-        faces[i] = [0, i + 1, i + 2]
+    faces[:, 0] = 0  # All triangles start from center
+    faces[:, 1] = np.arange(1, n_segments)  # First arc point
+    faces[:, 2] = np.arange(2, n_segments + 1)  # Second arc point
     
     return vertices, faces
 
@@ -181,6 +188,8 @@ def run_standard_mode():
     general_info += f"angle: {cfg.angle}°\n"
     for key, val in c_names.items():
         general_info += f"{key}: {val}\n"
+    if cfg.use_spatial_hash:
+        general_info += f"spatial_hash: enabled\n"
     if cfg.add_obstacles:
         general_info += f"obstacles: {len(obstacles)}\n"
         general_info += f"repel_strength: {cfg.obstacle_repel_strength}\n"
@@ -197,69 +206,76 @@ def run_standard_mode():
 
     angle_cos = angle_to_cos(cfg.angle)
     max_neighbours = get_max_neighbours_value()
+    
+    # Cached visibility masks for visualization (computed once per frame)
+    cached_mask_all = None
+    cached_mask_limited = None
 
-    def update_max_neighbours_visualization():
-        """Update visualization for max_neighbours feature."""
-        if max_neighbours_markers is None or selected_boid_idx is None:
-            return
+    def update_visualization():
+        """Update all visualizations with cached visibility masks."""
+        nonlocal cached_mask_all, cached_mask_limited
         
-        # Get all visible neighbours (without max_neighbours limit)
-        mask_all = visibility(boids, cfg.perception, angle_cos, -1)
-        visible_mask = mask_all[selected_boid_idx]
+        # Compute visibility masks once per frame (cached)
+        needs_visibility = (selected_boid_idx is not None and sector_visual is not None) or \
+                          (max_neighbours_markers is not None and selected_boid_idx is not None)
         
-        # Get limited neighbours (with max_neighbours limit)
-        mask_limited = visibility(boids, cfg.perception, angle_cos, max_neighbours)
-        limited_mask = mask_limited[selected_boid_idx]
+        if needs_visibility:
+            cached_mask_all = visibility_func(boids, cfg.perception, angle_cos, -1)
+            if max_neighbours > 0:
+                cached_mask_limited = visibility_func(boids, cfg.perception, angle_cos, max_neighbours)
+            else:
+                cached_mask_limited = cached_mask_all
         
-        # Find neighbours that are visible but not used (beyond max_neighbours)
-        visible_but_not_used = visible_mask & ~limited_mask
+        # Update visibility sector visualization
+        if selected_boid_idx is not None and sector_visual is not None:
+            agent = boids[selected_boid_idx]
+            pos = agent[:2]
+            speed = agent[2:4]
+            
+            # Update sector mesh
+            vertices, faces = create_sector_mesh(pos, speed, cfg.perception, cfg.angle)
+            if vertices is not None and faces is not None:
+                sector_visual.set_data(vertices=vertices, faces=faces)
+            
+            # Use cached mask
+            visible_mask = cached_mask_all[selected_boid_idx]
+            
+            # Update visible arrows
+            if np.any(visible_mask):
+                visible_directions = directions(boids[visible_mask], cfg.dt)
+                visible_arrows.set_data(arrows=visible_directions)
+            else:
+                visible_arrows.set_data(arrows=np.zeros((0, 4)))
         
-        # Update markers for max_neighbours (used in calculations)
-        if np.any(limited_mask):
-            positions = boids[limited_mask, :2]
-            max_neighbours_markers.set_data(positions,
-                                           face_color=cfg.max_neighbours_color,
-                                           edge_color=None,
-                                           size=15,
-                                           edge_width=0)
-        else:
-            max_neighbours_markers.set_data(np.zeros((0, 2)))
-        
-        # Update markers for visible but not used
-        if np.any(visible_but_not_used):
-            positions = boids[visible_but_not_used, :2]
-            visible_not_used_markers.set_data(positions,
-                                             face_color=cfg.visible_not_used_color,
-                                             edge_color=None,
-                                             size=10,
-                                             edge_width=0)
-        else:
-            visible_not_used_markers.set_data(np.zeros((0, 2)))
-
-    def update_visibility_visualization():
-        """Update the visibility sector and highlighted agents."""
-        if selected_boid_idx is None or sector_visual is None:
-            return
-        
-        agent = boids[selected_boid_idx]
-        pos = agent[:2]
-        speed = agent[2:4]
-        
-        # Update sector mesh
-        vertices, faces = create_sector_mesh(pos, speed, cfg.perception, cfg.angle)
-        if vertices is not None and faces is not None:
-            sector_visual.set_data(vertices=vertices, faces=faces)
-        
-        # Get visible agents using visibility function
-        mask = visibility(boids, cfg.perception, angle_cos)
-        visible_mask = mask[selected_boid_idx]
-        
-        # Update visible arrows
-        if np.any(visible_mask):
-            visible_directions = directions(boids[visible_mask], cfg.dt)
-            visible_arrows.set_data(arrows=visible_directions)
-        else:
-            visible_arrows.set_data(arrows=np.zeros((0, 4)))
+        # Update max_neighbours visualization
+        if max_neighbours_markers is not None and selected_boid_idx is not None:
+            visible_mask = cached_mask_all[selected_boid_idx]
+            limited_mask = cached_mask_limited[selected_boid_idx]
+            
+            # Find neighbours that are visible but not used (beyond max_neighbours)
+            visible_but_not_used = visible_mask & ~limited_mask
+            
+            # Update markers for max_neighbours (used in calculations)
+            if np.any(limited_mask):
+                positions = boids[limited_mask, :2]
+                max_neighbours_markers.set_data(positions,
+                                               face_color=cfg.max_neighbours_color,
+                                               edge_color=None,
+                                               size=15,
+                                               edge_width=0)
+            else:
+                max_neighbours_markers.set_data(np.zeros((0, 2)))
+            
+            # Update markers for visible but not used
+            if np.any(visible_but_not_used):
+                positions = boids[visible_but_not_used, :2]
+                visible_not_used_markers.set_data(positions,
+                                                 face_color=cfg.visible_not_used_color,
+                                                 edge_color=None,
+                                                 size=10,
+                                                 edge_width=0)
+            else:
+                visible_not_used_markers.set_data(np.zeros((0, 2)))
 
     def make_video(event):
         """Write boids model visualization to video file using VisPy and ffmpeg"""
@@ -272,8 +288,7 @@ def run_standard_mode():
                        cfg.obstacle_repel_strength, cfg.obstacle_attract_strength,
                        max_neighbours)
         arrows.set_data(arrows=directions(boids, cfg.dt))
-        update_visibility_visualization()
-        update_max_neighbours_visualization()
+        update_visualization()
         if fr <= cfg.frames:
             frame = canvas.render(alpha=False)
             writer.append_data(frame)
@@ -292,8 +307,7 @@ def run_standard_mode():
                        cfg.obstacle_repel_strength, cfg.obstacle_attract_strength,
                        max_neighbours)
         arrows.set_data(arrows=directions(boids, cfg.dt))
-        update_visibility_visualization()
-        update_max_neighbours_visualization()
+        update_visualization()
         if fr <= cfg.frames:
             canvas.render(alpha=False)
         else:
@@ -449,6 +463,8 @@ def run_hunters_mode():
     general_info += f"angle_pred_see_prey: {cfg.angle_pred_see_prey}°\n"
     general_info += f"predator_to_prey: {cfg.predator_to_prey_attraction}\n"
     general_info += f"prey_to_predator: {cfg.prey_to_predator_avoidance}\n"
+    if cfg.use_spatial_hash:
+        general_info += f"spatial_hash: enabled\n"
     if cfg.add_obstacles:
         general_info += f"obstacles: {len(obstacles)}\n"
         general_info += f"repel_strength: {cfg.obstacle_repel_strength}\n"
@@ -470,132 +486,11 @@ def run_hunters_mode():
     writer = imageio.get_writer(f'animation_hunters_{cfg.N}.mp4', fps=60)
     fr = 0
 
-    def update_max_neighbours_visualization():
-        """Update visualization for max_neighbours feature in hunters mode."""
-        if max_neighbours_markers is None:
-            return
-        
-        if selected_prey_idx is not None:
-            # Visualizing a prey agent
-            # Get all visible prey (without max_neighbours limit)
-            mask_all_prey = visibility(prey, cfg.perception, angle_cos, -1)
-            visible_prey_mask = mask_all_prey[selected_prey_idx]
-            
-            # Get limited prey (with max_neighbours limit)
-            mask_limited_prey = visibility(prey, cfg.perception, angle_cos, max_neighbours)
-            limited_prey_mask = mask_limited_prey[selected_prey_idx]
-            
-            # Get all visible predators (without limit)
-            mask_all_pred = visibility_cross(prey[selected_prey_idx:selected_prey_idx+1], 
-                                            predators, cfg.perception, angle_prey_pred_cos, -1)
-            visible_pred_mask = mask_all_pred[0]
-            
-            # Get limited predators
-            mask_limited_pred = visibility_cross(prey[selected_prey_idx:selected_prey_idx+1],
-                                                predators, cfg.perception, angle_prey_pred_cos, max_neighbours)
-            limited_pred_mask = mask_limited_pred[0]
-            
-            # Combine masks for all visible and limited
-            # For prey positions
-            visible_but_not_used_prey = visible_prey_mask & ~limited_prey_mask
-            visible_but_not_used_pred = visible_pred_mask & ~limited_pred_mask
-            
-            # Update markers for max_neighbours (used in calculations)
-            positions_list = []
-            if np.any(limited_prey_mask):
-                positions_list.append(prey[limited_prey_mask, :2])
-            if np.any(limited_pred_mask):
-                positions_list.append(predators[limited_pred_mask, :2])
-            
-            if positions_list:
-                positions = np.vstack(positions_list)
-                max_neighbours_markers.set_data(positions,
-                                               face_color=cfg.max_neighbours_color,
-                                               edge_color=None,
-                                               size=15,
-                                               edge_width=0)
-            else:
-                max_neighbours_markers.set_data(np.zeros((0, 2)))
-            
-            # Update markers for visible but not used
-            positions_list = []
-            if np.any(visible_but_not_used_prey):
-                positions_list.append(prey[visible_but_not_used_prey, :2])
-            if np.any(visible_but_not_used_pred):
-                positions_list.append(predators[visible_but_not_used_pred, :2])
-            
-            if positions_list:
-                positions = np.vstack(positions_list)
-                visible_not_used_markers.set_data(positions,
-                                                 face_color=cfg.visible_not_used_color,
-                                                 edge_color=None,
-                                                 size=10,
-                                                 edge_width=0)
-            else:
-                visible_not_used_markers.set_data(np.zeros((0, 2)))
-                
-        elif selected_pred_idx is not None:
-            # Visualizing a predator agent
-            # Get all visible predators (without max_neighbours limit)
-            mask_all_pred = visibility(predators, cfg.perception, angle_cos, -1)
-            visible_pred_mask = mask_all_pred[selected_pred_idx]
-            
-            # Get limited predators (with max_neighbours limit)
-            mask_limited_pred = visibility(predators, cfg.perception, angle_cos, max_neighbours)
-            limited_pred_mask = mask_limited_pred[selected_pred_idx]
-            
-            # Get all visible prey (without limit)
-            mask_all_prey = visibility_cross(predators[selected_pred_idx:selected_pred_idx+1],
-                                            prey, cfg.perception, angle_pred_prey_cos, -1)
-            visible_prey_mask = mask_all_prey[0]
-            
-            # Get limited prey
-            mask_limited_prey = visibility_cross(predators[selected_pred_idx:selected_pred_idx+1],
-                                                prey, cfg.perception, angle_pred_prey_cos, max_neighbours)
-            limited_prey_mask = mask_limited_prey[0]
-            
-            # Combine masks
-            visible_but_not_used_prey = visible_prey_mask & ~limited_prey_mask
-            visible_but_not_used_pred = visible_pred_mask & ~limited_pred_mask
-            
-            # Update markers for max_neighbours (used in calculations)
-            positions_list = []
-            if np.any(limited_prey_mask):
-                positions_list.append(prey[limited_prey_mask, :2])
-            if np.any(limited_pred_mask):
-                positions_list.append(predators[limited_pred_mask, :2])
-            
-            if positions_list:
-                positions = np.vstack(positions_list)
-                max_neighbours_markers.set_data(positions,
-                                               face_color=cfg.max_neighbours_color,
-                                               edge_color=None,
-                                               size=15,
-                                               edge_width=0)
-            else:
-                max_neighbours_markers.set_data(np.zeros((0, 2)))
-            
-            # Update markers for visible but not used
-            positions_list = []
-            if np.any(visible_but_not_used_prey):
-                positions_list.append(prey[visible_but_not_used_prey, :2])
-            if np.any(visible_but_not_used_pred):
-                positions_list.append(predators[visible_but_not_used_pred, :2])
-            
-            if positions_list:
-                positions = np.vstack(positions_list)
-                visible_not_used_markers.set_data(positions,
-                                                 face_color=cfg.visible_not_used_color,
-                                                 edge_color=None,
-                                                 size=10,
-                                                 edge_width=0)
-            else:
-                visible_not_used_markers.set_data(np.zeros((0, 2)))
-
-    def update_visibility_visualization():
-        """Update the visibility sector and highlighted agents for hunters mode."""
-        if sector_visual is None:
-            return
+    def update_visualization():
+        """Update all visualizations for hunters mode with optimized visibility calls."""
+        # Determine what visualizations are needed
+        needs_sector = sector_visual is not None
+        needs_max_neighbours = max_neighbours_markers is not None
         
         if selected_prey_idx is not None:
             # Visualizing a prey agent
@@ -603,36 +498,84 @@ def run_hunters_mode():
             pos = agent[:2]
             speed = agent[2:4]
             
-            # Use same-species angle for sector visualization
-            angle_deg = cfg.angle
-            angle_cos_val = angle_cos
+            # Update sector mesh if needed
+            if needs_sector:
+                vertices, faces = create_sector_mesh(pos, speed, cfg.perception, cfg.angle)
+                if vertices is not None and faces is not None:
+                    sector_visual.set_data(vertices=vertices, faces=faces)
             
-            # Update sector mesh
-            vertices, faces = create_sector_mesh(pos, speed, cfg.perception, angle_deg)
-            if vertices is not None and faces is not None:
-                sector_visual.set_data(vertices=vertices, faces=faces)
+            # Compute visibility masks once (cached for this frame)
+            mask_prey_all = visibility_func(prey, cfg.perception, angle_cos, -1)
+            visible_prey_mask = mask_prey_all[selected_prey_idx]
             
-            # Get visible prey (same species) - use same-species angle
-            mask_prey = visibility(prey, cfg.perception, angle_cos_val)
-            visible_prey_mask = mask_prey[selected_prey_idx]
+            if max_neighbours > 0:
+                mask_prey_limited = visibility_func(prey, cfg.perception, angle_cos, max_neighbours)
+                limited_prey_mask = mask_prey_limited[selected_prey_idx]
+            else:
+                limited_prey_mask = visible_prey_mask
             
-            # Get visible predators (cross-species) - use prey seeing predator angle
-            mask_pred = visibility_cross(prey[selected_prey_idx:selected_prey_idx+1], 
-                                         predators, cfg.perception, angle_prey_pred_cos)
-            visible_pred_mask = mask_pred[0]
+            # Cross-species visibility
+            mask_pred_all = visibility_cross(prey[selected_prey_idx:selected_prey_idx+1], 
+                                            predators, cfg.perception, angle_prey_pred_cos, -1)
+            visible_pred_mask = mask_pred_all[0]
+            
+            if max_neighbours > 0:
+                mask_pred_limited = visibility_cross(prey[selected_prey_idx:selected_prey_idx+1],
+                                                    predators, cfg.perception, angle_prey_pred_cos, max_neighbours)
+                limited_pred_mask = mask_pred_limited[0]
+            else:
+                limited_pred_mask = visible_pred_mask
             
             # Update visible arrows
-            if np.any(visible_prey_mask):
-                visible_directions = directions(prey[visible_prey_mask], cfg.dt)
-                visible_prey_arrows.set_data(arrows=visible_directions)
-            else:
-                visible_prey_arrows.set_data(arrows=np.zeros((0, 4)))
+            if needs_sector:
+                if np.any(visible_prey_mask):
+                    visible_directions = directions(prey[visible_prey_mask], cfg.dt)
+                    visible_prey_arrows.set_data(arrows=visible_directions)
+                else:
+                    visible_prey_arrows.set_data(arrows=np.zeros((0, 4)))
+                
+                if np.any(visible_pred_mask):
+                    visible_directions = directions(predators[visible_pred_mask], cfg.dt)
+                    visible_pred_arrows.set_data(arrows=visible_directions)
+                else:
+                    visible_pred_arrows.set_data(arrows=np.zeros((0, 4)))
             
-            if np.any(visible_pred_mask):
-                visible_directions = directions(predators[visible_pred_mask], cfg.dt)
-                visible_pred_arrows.set_data(arrows=visible_directions)
-            else:
-                visible_pred_arrows.set_data(arrows=np.zeros((0, 4)))
+            # Update max_neighbours markers
+            if needs_max_neighbours:
+                visible_but_not_used_prey = visible_prey_mask & ~limited_prey_mask
+                visible_but_not_used_pred = visible_pred_mask & ~limited_pred_mask
+                
+                positions_list = []
+                if np.any(limited_prey_mask):
+                    positions_list.append(prey[limited_prey_mask, :2])
+                if np.any(limited_pred_mask):
+                    positions_list.append(predators[limited_pred_mask, :2])
+                
+                if positions_list:
+                    positions = np.vstack(positions_list)
+                    max_neighbours_markers.set_data(positions,
+                                                   face_color=cfg.max_neighbours_color,
+                                                   edge_color=None,
+                                                   size=15,
+                                                   edge_width=0)
+                else:
+                    max_neighbours_markers.set_data(np.zeros((0, 2)))
+                
+                positions_list = []
+                if np.any(visible_but_not_used_prey):
+                    positions_list.append(prey[visible_but_not_used_prey, :2])
+                if np.any(visible_but_not_used_pred):
+                    positions_list.append(predators[visible_but_not_used_pred, :2])
+                
+                if positions_list:
+                    positions = np.vstack(positions_list)
+                    visible_not_used_markers.set_data(positions,
+                                                     face_color=cfg.visible_not_used_color,
+                                                     edge_color=None,
+                                                     size=10,
+                                                     edge_width=0)
+                else:
+                    visible_not_used_markers.set_data(np.zeros((0, 2)))
                 
         elif selected_pred_idx is not None:
             # Visualizing a predator agent
@@ -640,36 +583,84 @@ def run_hunters_mode():
             pos = agent[:2]
             speed = agent[2:4]
             
-            # Use same-species angle for sector visualization
-            angle_deg = cfg.angle
-            angle_cos_val = angle_cos
+            # Update sector mesh if needed
+            if needs_sector:
+                vertices, faces = create_sector_mesh(pos, speed, cfg.perception, cfg.angle)
+                if vertices is not None and faces is not None:
+                    sector_visual.set_data(vertices=vertices, faces=faces)
             
-            # Update sector mesh
-            vertices, faces = create_sector_mesh(pos, speed, cfg.perception, angle_deg)
-            if vertices is not None and faces is not None:
-                sector_visual.set_data(vertices=vertices, faces=faces)
+            # Compute visibility masks once (cached for this frame)
+            mask_pred_all = visibility_func(predators, cfg.perception, angle_cos, -1)
+            visible_pred_mask = mask_pred_all[selected_pred_idx]
             
-            # Get visible predators (same species) - use same-species angle
-            mask_pred = visibility(predators, cfg.perception, angle_cos_val)
-            visible_pred_mask = mask_pred[selected_pred_idx]
+            if max_neighbours > 0:
+                mask_pred_limited = visibility_func(predators, cfg.perception, angle_cos, max_neighbours)
+                limited_pred_mask = mask_pred_limited[selected_pred_idx]
+            else:
+                limited_pred_mask = visible_pred_mask
             
-            # Get visible prey (cross-species) - use predator seeing prey angle
-            mask_prey = visibility_cross(predators[selected_pred_idx:selected_pred_idx+1],
-                                         prey, cfg.perception, angle_pred_prey_cos)
-            visible_prey_mask = mask_prey[0]
+            # Cross-species visibility
+            mask_prey_all = visibility_cross(predators[selected_pred_idx:selected_pred_idx+1],
+                                            prey, cfg.perception, angle_pred_prey_cos, -1)
+            visible_prey_mask = mask_prey_all[0]
+            
+            if max_neighbours > 0:
+                mask_prey_limited = visibility_cross(predators[selected_pred_idx:selected_pred_idx+1],
+                                                    prey, cfg.perception, angle_pred_prey_cos, max_neighbours)
+                limited_prey_mask = mask_prey_limited[0]
+            else:
+                limited_prey_mask = visible_prey_mask
             
             # Update visible arrows
-            if np.any(visible_prey_mask):
-                visible_directions = directions(prey[visible_prey_mask], cfg.dt)
-                visible_prey_arrows.set_data(arrows=visible_directions)
-            else:
-                visible_prey_arrows.set_data(arrows=np.zeros((0, 4)))
+            if needs_sector:
+                if np.any(visible_prey_mask):
+                    visible_directions = directions(prey[visible_prey_mask], cfg.dt)
+                    visible_prey_arrows.set_data(arrows=visible_directions)
+                else:
+                    visible_prey_arrows.set_data(arrows=np.zeros((0, 4)))
+                
+                if np.any(visible_pred_mask):
+                    visible_directions = directions(predators[visible_pred_mask], cfg.dt)
+                    visible_pred_arrows.set_data(arrows=visible_directions)
+                else:
+                    visible_pred_arrows.set_data(arrows=np.zeros((0, 4)))
             
-            if np.any(visible_pred_mask):
-                visible_directions = directions(predators[visible_pred_mask], cfg.dt)
-                visible_pred_arrows.set_data(arrows=visible_directions)
-            else:
-                visible_pred_arrows.set_data(arrows=np.zeros((0, 4)))
+            # Update max_neighbours markers
+            if needs_max_neighbours:
+                visible_but_not_used_prey = visible_prey_mask & ~limited_prey_mask
+                visible_but_not_used_pred = visible_pred_mask & ~limited_pred_mask
+                
+                positions_list = []
+                if np.any(limited_prey_mask):
+                    positions_list.append(prey[limited_prey_mask, :2])
+                if np.any(limited_pred_mask):
+                    positions_list.append(predators[limited_pred_mask, :2])
+                
+                if positions_list:
+                    positions = np.vstack(positions_list)
+                    max_neighbours_markers.set_data(positions,
+                                                   face_color=cfg.max_neighbours_color,
+                                                   edge_color=None,
+                                                   size=15,
+                                                   edge_width=0)
+                else:
+                    max_neighbours_markers.set_data(np.zeros((0, 2)))
+                
+                positions_list = []
+                if np.any(visible_but_not_used_prey):
+                    positions_list.append(prey[visible_but_not_used_prey, :2])
+                if np.any(visible_but_not_used_pred):
+                    positions_list.append(predators[visible_but_not_used_pred, :2])
+                
+                if positions_list:
+                    positions = np.vstack(positions_list)
+                    visible_not_used_markers.set_data(positions,
+                                                     face_color=cfg.visible_not_used_color,
+                                                     edge_color=None,
+                                                     size=10,
+                                                     edge_width=0)
+                else:
+                    visible_not_used_markers.set_data(np.zeros((0, 2)))
 
     def make_video(event):
         """Write hunters/prey visualization to video file"""
@@ -687,8 +678,7 @@ def run_hunters_mode():
                                 max_neighbours)
         arrows_prey.set_data(arrows=directions(prey, cfg.dt))
         arrows_pred.set_data(arrows=directions(predators, cfg.dt))
-        update_visibility_visualization()
-        update_max_neighbours_visualization()
+        update_visualization()
         if fr <= cfg.frames:
             frame = canvas.render(alpha=False)
             writer.append_data(frame)
@@ -712,8 +702,7 @@ def run_hunters_mode():
                                 max_neighbours)
         arrows_prey.set_data(arrows=directions(prey, cfg.dt))
         arrows_pred.set_data(arrows=directions(predators, cfg.dt))
-        update_visibility_visualization()
-        update_max_neighbours_visualization()
+        update_visualization()
         if fr <= cfg.frames:
             canvas.render(alpha=False)
         else:

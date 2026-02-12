@@ -93,3 +93,8 @@ visualize_max_neighbours = False
 max_neighbours_color = (1.0, 1.0, 0.0, 0.6)       # Yellow glow for max neighbours used in calculations
 # These are visible but not used (beyond max_neighbours limit)
 visible_not_used_color = (0.5, 0.5, 0.5, 0.3)     # Grey for visible but not used neighbours
+
+# Performance optimization: Spatial hashing
+# When enabled, uses O(n) spatial hashing instead of O(n²) pairwise distance calculation
+# Recommended for N > 500, may have overhead for smaller populations
+use_spatial_hash = False  # Enable/disable spatial hashing optimization
