@@ -175,7 +175,7 @@ def visibility(boids: np.ndarray, perception: float, angle: float) -> np.ndarray
     angles = np.zeros(shape=(n, n), dtype=np.float64)
     for i in range(n):
         for j in range(n):
-            v = vectors[i] - vectors[j]
+            v = vectors[j] - vectors[i]
             d = (v @ v)
             dist[i, j] = d
             angles[i, j] = np.dot(normalize(speeds[i]), normalize(v))
@@ -191,10 +191,10 @@ def visibility(boids: np.ndarray, perception: float, angle: float) -> np.ndarray
 def cohesion(boids: np.ndarray,
              idx: int,
              neigh_mask: np.ndarray,
-             perception: float) -> np.ndarray:
+             cohesion_strength: float) -> np.ndarray:
     """Implements cohesion component of acceleration via median center of group in sector"""
-    center = median_axis(boids[neigh_mask, :2], axis=0)
-    a = (center - boids[idx, :2]) / perception
+    center = mean_axis(boids[neigh_mask, :2], axis=0)
+    a = (center - boids[idx, :2]) / cohesion_strength
     return a
 
 
@@ -203,8 +203,8 @@ def separation(boids: np.ndarray,
                idx: int,
                neigh_mask: np.ndarray) -> np.ndarray:
     """Implements separation component of acceleration via median within group in sector"""
-    d = median_axis(boids[neigh_mask, :2] - boids[idx, :2], axis=0)
-    return -d / ((d[0]**2 + d[1]**2) + 1)
+    d = mean_axis(boids[neigh_mask, :2] - boids[idx, :2], axis=0)
+    return -d / (d[0]**2 + d[1]**2)
 
 
 @njit()
@@ -212,8 +212,8 @@ def alignment(boids: np.ndarray,
               idx: int,
               neigh_mask: np.ndarray,
               v_range: tuple) -> np.ndarray:
-    """Implements median-based alingment component of acceleration within group in sector"""
-    v_mean = median_axis(boids[neigh_mask, 2:4], axis=0)
+    """Implements mean-based alignment component of acceleration within group in sector"""
+    v_mean = mean_axis(boids[neigh_mask, 2:4], axis=0)
     a = (v_mean - boids[idx, 2:4]) / (2 * v_range[1])
     return a
 
@@ -232,13 +232,18 @@ def noise():
 @njit(parallel=True)
 def flocking(boids: np.ndarray,
              perception: float,
+             cohesion_strength: float,
              coeffs: np.ndarray,
              asp: float,
              v_range: tuple,
-             angle_cos: float = 0.0) -> None:
+             angle_cos: float = 0.0,
+             obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
+             repel_strength: float = 0.0,
+             attract_strength: float = 0.0) -> None:
     """
     Implements boids visibility computation and acceleration computation via four different
     components - cohesion, alignment, separation, noise within sector of certain radius and angle.
+    Optionally includes obstacle interactions (repelling and attracting).
     
     Args:
         boids: Array of boids (shape: n x 6)
@@ -247,10 +252,15 @@ def flocking(boids: np.ndarray,
         asp: Aspect ratio of simulation area
         v_range: Velocity range tuple (min, max)
         angle_cos: Cosine of half-angle for visibility sector (0.0 = 90°, -1.0 = 180°)
+        obstacles: Array of obstacles (shape: n_obstacles x 4) with [x, y, radius, type], optional
+        repel_strength: Strength of repelling obstacle force, optional
+        attract_strength: Strength of attracting obstacle force, optional
     """
     n = boids.shape[0]
     mask = visibility(boids, perception, angle_cos)
     wal = walls(boids, asp)
+    has_obstacles = obstacles.shape[0] > 0
+    
     for i in prange(n):
         if not np.any(mask[i]):
             coh = np.zeros(2)
@@ -258,30 +268,45 @@ def flocking(boids: np.ndarray,
             sep = np.zeros(2)
             ns = np.zeros(2)
         else:
-            coh = cohesion(boids, i, mask[i], perception)
+            coh = cohesion(boids, i, mask[i], cohesion_strength)
             alg = alignment(boids, i, mask[i], v_range)
             sep = separation(boids, i, mask[i])
             ns = noise()
+        
+        # Calculate obstacle force if obstacles exist
+        if has_obstacles:
+            obs_force = obstacles_force(boids[i, :2], obstacles,
+                                        repel_strength, attract_strength, perception)
+        else:
+            obs_force = np.zeros(2)
+        
         boids[i, 4] = (coeffs[0] * coh[0]
                        + coeffs[1] * alg[0]
                        + coeffs[2] * sep[0]
                        + coeffs[3] * wal[i][0]
-                       + coeffs[4] * ns[0])
+                       + coeffs[4] * ns[0]
+                       + obs_force[0])
         boids[i, 5] = (coeffs[0] * coh[1]
                        + coeffs[1] * alg[1]
                        + coeffs[2] * sep[1]
                        + coeffs[3] * wal[i][1]
-                       + coeffs[4] * ns[0])
+                       + coeffs[4] * ns[1]
+                       + obs_force[1])
 
 
 def simulation_step(boids: np.ndarray,
                     asp: float,
                     perception: float,
+                    cohesion_strength: float,
                     coefficients: np.ndarray,
                     v_range: tuple,
                     dt: float,
-                    angle_cos: float = 0.0) -> None:
+                    angle_cos: float = 0.0,
+                    obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
+                    repel_strength: float = 0.0,
+                    attract_strength: float = 0.0) -> None:
     """Implements full step of boids model simulation with updating their positions and propagation.
+    Optionally includes obstacle interactions.
     
     Args:
         boids: Array of boids
@@ -291,8 +316,12 @@ def simulation_step(boids: np.ndarray,
         v_range: Velocity range tuple (min, max)
         dt: Time step
         angle_cos: Cosine of half-angle for visibility sector
+        obstacles: Array of obstacles (shape: n_obstacles x 4), optional
+        repel_strength: Strength of repelling obstacle force, optional
+        attract_strength: Strength of attracting obstacle force, optional
     """
-    flocking(boids, perception, coefficients, asp, v_range, angle_cos)
+    flocking(boids, perception, cohesion_strength, coefficients, asp, v_range, angle_cos,
+             obstacles, repel_strength, attract_strength)
     propagate(boids, dt, v_range)
     periodic_walls(boids, asp)
     wall_avoidance(boids, asp)
@@ -384,13 +413,18 @@ def separation_cross(boids1: np.ndarray, idx: int, boids2: np.ndarray,
 @njit(parallel=True)
 def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
                      perception: float,
+                     cohesion_strength: float,
                      prey_coeffs: np.ndarray, pred_coeffs: np.ndarray,
                      pred_to_prey_attraction: float, prey_to_predator_avoidance: float,
                      asp: float, v_range: tuple,
                      angle_cos: float = 0.0,
                      angle_prey_pred_cos: float = -1.0,
-                     angle_pred_prey_cos: float = -1.0) -> None:
+                     angle_pred_prey_cos: float = -1.0,
+                     obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
+                     repel_strength: float = 0.0,
+                     attract_strength: float = 0.0) -> None:
     """Implements flocking behavior for both prey and predator boids with cross-species interactions.
+    Optionally includes obstacle interactions.
     
     Uses sector-based visibility where agents can only see others within a cone oriented
     along their velocity vector.
@@ -408,6 +442,9 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
         angle_cos: Cosine of half-angle for same-species visibility sector
         angle_prey_pred_cos: Cosine of half-angle for prey seeing predators
         angle_pred_prey_cos: Cosine of half-angle for predators seeing prey
+        obstacles: Array of obstacles (shape: n_obstacles x 4), optional
+        repel_strength: Strength of repelling obstacle force, optional
+        attract_strength: Strength of attracting obstacle force, optional
     """
     n_prey = prey.shape[0]
     n_pred = predators.shape[0]
@@ -425,6 +462,9 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
     wal_prey = walls(prey, asp)
     wal_pred = walls(predators, asp)
     
+    # Check if obstacles exist
+    has_obstacles = obstacles.shape[0] > 0
+    
     # Update prey
     for i in prange(n_prey):
         # Standard flocking with other prey
@@ -433,12 +473,19 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
             alg = np.zeros(2)
             sep_prey = np.zeros(2)
         else:
-            coh = cohesion(prey, i, mask_prey[i], perception)
+            coh = cohesion(prey, i, mask_prey[i], cohesion_strength)
             alg = alignment(prey, i, mask_prey[i], v_range)
             sep_prey = separation(prey, i, mask_prey[i])
         
         # Separation from predators (increased - avoidance)
         sep_pred = separation_cross(prey, i, predators, prey_see_pred[i])
+        
+        # Obstacle force
+        if has_obstacles:
+            obs_force = obstacles_force(prey[i, :2], obstacles,
+                                        repel_strength, attract_strength, perception)
+        else:
+            obs_force = np.zeros(2)
         
         ns = noise()
         
@@ -447,13 +494,15 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
                       + prey_coeffs[2] * sep_prey[0]
                       + prey_coeffs[3] * wal_prey[i][0]
                       + prey_coeffs[4] * ns[0]
-                      + prey_to_predator_avoidance * sep_pred[0])
+                      + prey_to_predator_avoidance * sep_pred[0]
+                      + obs_force[0])
         prey[i, 5] = (prey_coeffs[0] * coh[1]
                       + prey_coeffs[1] * alg[1]
                       + prey_coeffs[2] * sep_prey[1]
                       + prey_coeffs[3] * wal_prey[i][1]
                       + prey_coeffs[4] * ns[1]
-                      + prey_to_predator_avoidance * sep_pred[1])
+                      + prey_to_predator_avoidance * sep_pred[1]
+                      + obs_force[1])
     
     # Update predators
     for i in prange(n_pred):
@@ -463,12 +512,19 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
             alg = np.zeros(2)
             sep_pred = np.zeros(2)
         else:
-            coh = cohesion(predators, i, mask_pred[i], perception)
+            coh = cohesion(predators, i, mask_pred[i], cohesion_strength)
             alg = alignment(predators, i, mask_pred[i], v_range)
             sep_pred = separation(predators, i, mask_pred[i])
         
         # Separation from prey (reduced - attraction/chase)
         sep_prey = separation_cross(predators, i, prey, pred_see_prey[i])
+        
+        # Obstacle force
+        if has_obstacles:
+            obs_force = obstacles_force(predators[i, :2], obstacles,
+                                        repel_strength, attract_strength, perception)
+        else:
+            obs_force = np.zeros(2)
         
         ns = noise()
         
@@ -477,24 +533,30 @@ def flocking_hunters(prey: np.ndarray, predators: np.ndarray,
                            + pred_coeffs[2] * sep_pred[0]
                            + pred_coeffs[3] * wal_pred[i][0]
                            + pred_coeffs[4] * ns[0]
-                           + pred_to_prey_attraction * sep_prey[0])
+                           + pred_to_prey_attraction * sep_prey[0]
+                           + obs_force[0])
         predators[i, 5] = (pred_coeffs[0] * coh[1]
                            + pred_coeffs[1] * alg[1]
                            + pred_coeffs[2] * sep_pred[1]
                            + pred_coeffs[3] * wal_pred[i][1]
                            + pred_coeffs[4] * ns[1]
-                           + pred_to_prey_attraction * sep_prey[1])
+                           + pred_to_prey_attraction * sep_prey[1]
+                           + obs_force[1])
 
 
 def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
-                            asp: float, perception: float,
+                            asp: float, perception: float, cohesion_strength: float,
                             prey_coeffs: np.ndarray, pred_coeffs: np.ndarray,
                             pred_to_prey_attraction: float, prey_to_predator_avoidance: float,
                             v_range: tuple, dt: float,
                             angle_cos: float = 0.0,
                             angle_prey_pred_cos: float = -1.0,
-                            angle_pred_prey_cos: float = -1.0) -> None:
+                            angle_pred_prey_cos: float = -1.0,
+                            obstacles: np.ndarray = np.zeros((0, 4), dtype=np.float64),
+                            repel_strength: float = 0.0,
+                            attract_strength: float = 0.0) -> None:
     """Implements full step of hunters/prey simulation with updating positions and propagation.
+    Optionally includes obstacle interactions.
     
     Args:
         prey: Array of prey boids
@@ -510,14 +572,135 @@ def simulation_step_hunters(prey: np.ndarray, predators: np.ndarray,
         angle_cos: Cosine of half-angle for same-species visibility
         angle_prey_pred_cos: Cosine of half-angle for prey seeing predators
         angle_pred_prey_cos: Cosine of half-angle for predators seeing prey
+        obstacles: Array of obstacles (shape: n_obstacles x 4), optional
+        repel_strength: Strength of repelling obstacle force, optional
+        attract_strength: Strength of attracting obstacle force, optional
     """
-    flocking_hunters(prey, predators, perception,
+    flocking_hunters(prey, predators, perception, cohesion_strength,
                      prey_coeffs, pred_coeffs,
                      pred_to_prey_attraction, prey_to_predator_avoidance,
-                     asp, v_range, angle_cos, angle_prey_pred_cos, angle_pred_prey_cos)
+                     asp, v_range, angle_cos, angle_prey_pred_cos, angle_pred_prey_cos,
+                     obstacles, repel_strength, attract_strength)
     propagate(prey, dt, v_range)
     propagate(predators, dt, v_range)
     periodic_walls(prey, asp)
     periodic_walls(predators, asp)
     wall_avoidance(prey, asp)
     wall_avoidance(predators, asp)
+
+
+# +---------------------------------------------------+ #
+# Implementation of obstacles variant of boids model    #
+# +---------------------------------------------------+ #
+
+def init_obstacles(obstacles_config: list, asp: float) -> np.ndarray:
+    """Initialize obstacles array from config with random positions.
+    
+    Places obstacles randomly in the simulation area, ensuring they don't
+    overlap with the boundaries.
+    
+    Args:
+        obstacles_config: List of (radius, type) tuples
+            - radius: Size of the obstacle
+            - type: 0 = repelling, 1 = attracting
+        asp: Aspect ratio of simulation area
+        
+    Returns:
+        np.ndarray of shape (n_obstacles, 4) with columns [x, y, radius, type]
+    """
+    n = len(obstacles_config)
+    if n == 0:
+        return np.zeros((0, 4), dtype=np.float64)
+    
+    obstacles = np.zeros((n, 4), dtype=np.float64)
+    rng = np.random.default_rng()
+    
+    for i, (radius, obs_type) in enumerate(obstacles_config):
+        # Place obstacle randomly, keeping it fully inside the simulation area
+        # with some margin from the walls
+        margin = radius + 0.05
+        obstacles[i, 0] = rng.uniform(margin, asp - margin)  # x
+        obstacles[i, 1] = rng.uniform(margin, 1.0 - margin)  # y
+        obstacles[i, 2] = radius
+        obstacles[i, 3] = obs_type
+    
+    return obstacles
+
+
+@njit()
+def obstacle_force(agent_pos: np.ndarray, obstacle: np.ndarray,
+                   repel_strength: float, attract_strength: float,
+                   perception: float) -> np.ndarray:
+    """Calculate force on agent from a single obstacle.
+    
+    For repelling obstacles: force pushes agent away from center
+    For attracting obstacles: force pulls agent toward center
+    
+    The force magnitude decreases with distance squared.
+    
+    Args:
+        agent_pos: Agent position (x, y)
+        obstacle: Obstacle data [x, y, radius, type]
+        repel_strength: Strength of repelling force
+        attract_strength: Strength of attracting force
+        perception: Maximum interaction distance
+        
+    Returns:
+        Force vector (fx, fy)
+    """
+    # Direction from obstacle center to agent
+    dx = agent_pos[0] - obstacle[0]
+    dy = agent_pos[1] - obstacle[1]
+    distance = np.sqrt(dx * dx + dy * dy)
+    
+    # Only interact if within perception range
+    if distance > perception + obstacle[2]:
+        return np.zeros(2)
+    
+    # Avoid division by zero
+    if distance < 0.001:
+        distance = 0.001
+    
+    # Normalize direction
+    dir_x = dx / distance
+    dir_y = dy / distance
+    
+    # Calculate force based on obstacle type
+    obs_type = obstacle[3]
+    
+    if obs_type == 0:  # Repelling
+        # Force magnitude decreases with distance
+        # Stronger when closer to obstacle
+        magnitude = repel_strength / (distance * distance + 0.1)
+        return np.array([dir_x * magnitude, dir_y * magnitude])
+    else:  # Attracting
+        # Force pulls toward center (negative direction)
+        magnitude = attract_strength / (distance * distance + 0.1)
+        return np.array([-dir_x * magnitude, -dir_y * magnitude])
+
+
+@njit()
+def obstacles_force(agent_pos: np.ndarray, obstacles: np.ndarray,
+                    repel_strength: float, attract_strength: float,
+                    perception: float) -> np.ndarray:
+    """Calculate total force on agent from all obstacles.
+    
+    Args:
+        agent_pos: Agent position (x, y)
+        obstacles: Array of obstacles (n_obstacles x 4)
+        repel_strength: Strength of repelling force
+        attract_strength: Strength of attracting force
+        perception: Maximum interaction distance
+        
+    Returns:
+        Total force vector (fx, fy)
+    """
+    total_force = np.zeros(2)
+    n_obstacles = obstacles.shape[0]
+    
+    for i in range(n_obstacles):
+        force = obstacle_force(agent_pos, obstacles[i], 
+                               repel_strength, attract_strength, perception)
+        total_force += force
+    
+    return total_force

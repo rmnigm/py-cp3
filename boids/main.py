@@ -2,13 +2,16 @@ import numpy as np
 import imageio
 from vispy import app, scene  # type: ignore
 from vispy.geometry import Rect  # type: ignore
-from vispy.scene.visuals import Text, Mesh  # type: ignore
+from vispy.scene.visuals import Text, Mesh, Ellipse  # type: ignore
 
 import config as cfg
 from funcs import init_boids, directions, simulation_step, visibility, angle_to_cos
 
 if cfg.add_hunters:
     from funcs import init_boids_hunters, simulation_step_hunters, visibility_cross
+
+if cfg.add_obstacles:
+    from funcs import init_obstacles
 
 
 def create_sector_mesh(pos: np.ndarray, speed: np.ndarray, perception: float, 
@@ -55,6 +58,37 @@ def create_sector_mesh(pos: np.ndarray, speed: np.ndarray, perception: float,
     return vertices, faces
 
 
+def create_obstacle_visuals(obstacles: np.ndarray, view) -> list:
+    """Create visual representations of obstacles as circles.
+    
+    Args:
+        obstacles: Array of obstacles (n_obstacles x 4) with [x, y, radius, type]
+        view: VisPy view to add obstacles to
+        
+    Returns:
+        List of Ellipse visuals for each obstacle
+    """
+    visuals = []
+    for obs in obstacles:
+        x, y, radius, obs_type = obs
+        # Choose color based on type
+        if obs_type == 0:  # Repelling
+            color = cfg.obstacle_repel_color
+        else:  # Attracting
+            color = cfg.obstacle_attract_color
+        
+        circle = Ellipse(
+            center=(x, y),
+            radius=radius,
+            color=color,
+            border_color='white',
+            border_width=2,
+            parent=view.scene
+        )
+        visuals.append(circle)
+    return visuals
+
+
 def run_standard_mode():
     """Run the standard boids simulation without hunters."""
     c_names = cfg.coefficients
@@ -66,6 +100,13 @@ def run_standard_mode():
     canvas = scene.SceneCanvas(show=True, size=(cfg.w, cfg.h))
     view = canvas.central_widget.add_view()
     view.camera = scene.PanZoomCamera(rect=Rect(0, 0, cfg.asp, 1))
+    
+    # Initialize obstacles if enabled
+    obstacles = np.zeros((0, 4), dtype=np.float64)
+    obstacle_visuals = []
+    if cfg.add_obstacles:
+        obstacles = init_obstacles(cfg.obstacles, cfg.asp)
+        obstacle_visuals = create_obstacle_visuals(obstacles, view)
     
     # Main arrows for all boids
     arrows = scene.Arrow(arrows=directions(boids, cfg.dt),
@@ -100,13 +141,17 @@ def run_standard_mode():
     txt.font_size = 12
     
     txt_const = Text(parent=canvas.scene, color='green', face='Consolas')
-    txt_const.pos = canvas.size[0] // 16, canvas.size[1] // 10
+    txt_const.pos = canvas.size[0] // 16, canvas.size[1] // 5
     txt_const.font_size = 10
     
     general_info = f"boids: {cfg.N}\n"
     general_info += f"angle: {cfg.angle}°\n"
     for key, val in c_names.items():
         general_info += f"{key}: {val}\n"
+    if cfg.add_obstacles:
+        general_info += f"obstacles: {len(obstacles)}\n"
+        general_info += f"repel_strength: {cfg.obstacle_repel_strength}\n"
+        general_info += f"attract_strength: {cfg.obstacle_attract_strength}\n"
     if selected_boid_idx is not None:
         general_info += f"visualize_angle: boid #{selected_boid_idx}\n"
     txt_const.text = general_info
@@ -146,7 +191,9 @@ def run_standard_mode():
         if fr % 30 == 0:
             txt.text = "fps:" + f"{canvas.fps:0.1f}"
         fr += 1
-        simulation_step(boids, cfg.asp, cfg.perception, c, cfg.v_range, cfg.dt, angle_to_cos(cfg.angle))
+        simulation_step(boids, cfg.asp, cfg.perception, cfg.cohesion_strength, c, cfg.v_range, cfg.dt, 
+                       angle_to_cos(cfg.angle), obstacles, 
+                       cfg.obstacle_repel_strength, cfg.obstacle_attract_strength)
         arrows.set_data(arrows=directions(boids, cfg.dt))
         update_visibility_visualization()
         if fr <= cfg.frames:
@@ -162,7 +209,9 @@ def run_standard_mode():
         if fr % 30 == 0:
             txt.text = "fps:" + f"{canvas.fps:0.1f}"
         fr += 1
-        simulation_step(boids, cfg.asp, cfg.perception, c, cfg.v_range, cfg.dt, angle_to_cos(cfg.angle))
+        simulation_step(boids, cfg.asp, cfg.perception, cfg.cohesion_strength, c, cfg.v_range, cfg.dt,
+                       angle_to_cos(cfg.angle), obstacles,
+                       cfg.obstacle_repel_strength, cfg.obstacle_attract_strength)
         arrows.set_data(arrows=directions(boids, cfg.dt))
         update_visibility_visualization()
         if fr <= cfg.frames:
@@ -204,6 +253,13 @@ def run_hunters_mode():
     canvas = scene.SceneCanvas(show=True, size=(cfg.w, cfg.h))
     view = canvas.central_widget.add_view()
     view.camera = scene.PanZoomCamera(rect=Rect(0, 0, cfg.asp, 1))
+
+    # Initialize obstacles if enabled
+    obstacles = np.zeros((0, 4), dtype=np.float64)
+    obstacle_visuals = []
+    if cfg.add_obstacles:
+        obstacles = init_obstacles(cfg.obstacles, cfg.asp)
+        obstacle_visuals = create_obstacle_visuals(obstacles, view)
 
     # Create arrows for prey (green)
     arrows_prey = scene.Arrow(arrows=directions(prey, cfg.dt),
@@ -275,7 +331,7 @@ def run_hunters_mode():
 
     # Info text
     txt_const = Text(parent=canvas.scene, color='green', face='Consolas')
-    txt_const.pos = canvas.size[0] // 16, canvas.size[1] // 10
+    txt_const.pos = canvas.size[0] // 16, canvas.size[1] // 5
     txt_const.font_size = 10
 
     general_info = f"prey: {n_prey}, predators: {n_predators}\n"
@@ -284,6 +340,10 @@ def run_hunters_mode():
     general_info += f"angle_pred_see_prey: {cfg.angle_pred_see_prey}°\n"
     general_info += f"predator_to_prey: {cfg.predator_to_prey_attraction}\n"
     general_info += f"prey_to_predator: {cfg.prey_to_predator_avoidance}\n"
+    if cfg.add_obstacles:
+        general_info += f"obstacles: {len(obstacles)}\n"
+        general_info += f"repel_strength: {cfg.obstacle_repel_strength}\n"
+        general_info += f"attract_strength: {cfg.obstacle_attract_strength}\n"
     general_info += "--- Prey coeffs ---\n"
     for key, val in prey_c_names.items():
         general_info += f"{key}: {val}\n"
@@ -384,12 +444,13 @@ def run_hunters_mode():
         if fr % 30 == 0:
             txt.text = "fps:" + f"{canvas.fps:0.1f}"
         fr += 1
-        simulation_step_hunters(prey, predators, cfg.asp, cfg.perception,
+        simulation_step_hunters(prey, predators, cfg.asp, cfg.perception, cfg.cohesion_strength,
                                 prey_c, pred_c,
                                 cfg.predator_to_prey_attraction,
                                 cfg.prey_to_predator_avoidance,
                                 cfg.v_range, cfg.dt,
-                                angle_cos, angle_prey_pred_cos, angle_pred_prey_cos)
+                                angle_cos, angle_prey_pred_cos, angle_pred_prey_cos,
+                                obstacles, cfg.obstacle_repel_strength, cfg.obstacle_attract_strength)
         arrows_prey.set_data(arrows=directions(prey, cfg.dt))
         arrows_pred.set_data(arrows=directions(predators, cfg.dt))
         update_visibility_visualization()
@@ -406,12 +467,13 @@ def run_hunters_mode():
         if fr % 30 == 0:
             txt.text = "fps:" + f"{canvas.fps:0.1f}"
         fr += 1
-        simulation_step_hunters(prey, predators, cfg.asp, cfg.perception,
+        simulation_step_hunters(prey, predators, cfg.asp, cfg.perception, cfg.cohesion_strength,
                                 prey_c, pred_c,
                                 cfg.predator_to_prey_attraction,
                                 cfg.prey_to_predator_avoidance,
                                 cfg.v_range, cfg.dt,
-                                angle_cos, angle_prey_pred_cos, angle_pred_prey_cos)
+                                angle_cos, angle_prey_pred_cos, angle_pred_prey_cos,
+                                obstacles, cfg.obstacle_repel_strength, cfg.obstacle_attract_strength)
         arrows_prey.set_data(arrows=directions(prey, cfg.dt))
         arrows_pred.set_data(arrows=directions(predators, cfg.dt))
         update_visibility_visualization()
